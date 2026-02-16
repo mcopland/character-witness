@@ -1,0 +1,40 @@
+{
+  "name": "character-witness",
+  "displayName": "Character Witness",
+  "description": "Detect, highlight, diagnose, and optionally auto-replace non-ASCII characters in your files.",
+  "version": "1.0.0",
+  "publisher": "character-witness",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mcopland/character-witness.git"
+  },
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "generate": "ts-node --project scripts/tsconfig.json scripts/generate-unicode-data.ts",
+    "package": "vsce package",
+    "test:unit": "vitest run",
+    "vscode:prepublish": "npm run generate && npm run compile",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.2",
+    "@types/vscode": "^1.109.0",
+    "@unicode/unicode-16.0.0": "^1.6.16",
+    "@vscode/vsce": "^3.7.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

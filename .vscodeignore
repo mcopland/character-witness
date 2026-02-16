@@ -1,0 +1,12 @@
+.claude/**
+.gitignore
+.vscode/**
+*.vsix
+**/*.ts
+node_modules/**
+out/**/*.map
+out/**/*.test.*
+out/test/**
+scripts/**
+src/**
+tsconfig.json

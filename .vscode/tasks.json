@@ -1,0 +1,19 @@
+{
+  "tasks": [
+    {
+      "command": "npm run compile",
+      "group": {
+        "isDefault": true,
+        "kind": "build"
+      },
+      "label": "compile",
+      "presentation": {
+        "panel": "shared",
+        "reveal": "silent"
+      },
+      "problemMatcher": "$tsc",
+      "type": "shell"
+    }
+  ],
+  "version": "2.0.0"
+}

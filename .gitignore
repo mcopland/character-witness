@@ -1,0 +1,14 @@
+# Environment
+.claude/
+.git/
+.vscode/*
+
+# Build
+*.vsix
+node_modules/
+out/
+errors.json
+
+# Exceptions
+!.vscode/launch.json
+!.vscode/tasks.json
