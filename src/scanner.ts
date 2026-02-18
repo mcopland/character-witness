@@ -3,6 +3,13 @@ import { getCharacterName } from "./generated/unicode-names";
 import { titleCase, formatUPlus } from "./utils";
 import { getTextRegions, TextRegion } from "./regions";
 
+// ---------------------------------------------------------------------------
+// Codepoints that default to Error-level severity
+// (invisible/control chars and confusable fullwidth forms)
+// Note: surrogate code units (0xD800–0xDBFF, 0xDC00–0xDFFF) are handled
+// transparently by the string iterator below — they never appear as lone values.
+// ---------------------------------------------------------------------------
+
 export const ERROR_LEVEL_CODEPOINTS: Set<number> = new Set([
   0x00a0, // Non-Breaking Space
   0x00ad, // Soft Hyphen
