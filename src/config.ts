@@ -4,26 +4,17 @@ import { log } from "./logger";
 import { ERROR_LEVEL_CODEPOINTS } from "./scanner";
 
 const DEFAULT_DECORATION: Record<string, string> = {
-    // after:                "",
-    backgroundColor:      "rgba(125, 249, 255, 0.2)",
-    // before:               "",
-    // border:               "",
-    // borderColor:          "",
-    // borderRadius:         "",
-    // borderSpacing:        "",
-    // borderStyle:          "",
-    // borderWidth:          "",
-    // color:                "",
-    cursor:               "help",
-    // fontStyle:            "",
-    // fontWeight:           "",
-    // opacity:              "",
-    // outline:              "",
-    // outlineColor:         "",
-    // outlineStyle:         "",
-    // outlineWidth:         "",
-    // overviewRulerColor:   "",
-    // textDecoration:       "",
+  "backgroundColor":    "rgba(125, 249, 255, 0.2)",
+  "borderColor":        "rgba(125, 249, 255, 0.1)",
+  "borderRadius":       "4px",
+  "borderStyle":        "solid",
+  "borderWidth":        "2px",
+  "color":              "rgba(125, 249, 255, 1)",
+  "cursor":             "help",
+  "fontStyle":          "normal",
+  "fontWeight":         "600",
+  "opacity":            "1",
+  "overviewRulerColor": "",
 };
 
 function parseOverviewRulerLane(value: string): vscode.OverviewRulerLane {
