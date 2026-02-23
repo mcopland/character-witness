@@ -18,3 +18,14 @@ export function logError(context: string, error?: unknown): void {
     error instanceof Error ? error.message : error !== undefined ? String(error) : "unknown error";
   log(`ERROR [${context}] ${msg}`);
 }
+
+/**
+ * Log the error and show a user-facing error notification.
+ * Use this in event handlers and commands where the user needs to know
+ * something went wrong.
+ */
+export function handleError(context: string, error: unknown): void {
+  logError(context, error);
+  const msg = error instanceof Error ? error.message : String(error);
+  vscode.window.showErrorMessage(`Character Witness: ${msg}`);
+}

@@ -3,7 +3,7 @@ import { buildReplacementEdits } from "./autoreplace";
 import { addToAllowedCharacters } from "./commands";
 import { getCharacterSeverity, getConfig, invalidateConfigCache } from "./config";
 import { clearDecorations, disposeDecorationType, ensureDecorationType, resetDecorationKey } from "./decoration";
-import { initOutputChannel, log, logError } from "./logger";
+import { handleError, initOutputChannel, log, logError } from "./logger";
 import { findNonAsciiCharacters, formatGroupedDiagnosticMessage, formatHoverMarkdown, NonAsciiMatch } from "./scanner";
 
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -132,9 +132,7 @@ export function activate(context: vscode.ExtensionContext): void {
           updateEditor(editor);
         }
       } catch (err) {
-        logError("onDidChangeActiveTextEditor", err);
-        const msg = err instanceof Error ? err.message : String(err);
-        vscode.window.showErrorMessage(`Character Witness: ${msg}`);
+        handleError("onDidChangeActiveTextEditor", err);
       }
     })
   );
@@ -147,9 +145,7 @@ export function activate(context: vscode.ExtensionContext): void {
           scheduleUpdate(editor);
         }
       } catch (err) {
-        logError("onDidChangeTextDocument", err);
-        const msg = err instanceof Error ? err.message : String(err);
-        vscode.window.showErrorMessage(`Character Witness: ${msg}`);
+        handleError("onDidChangeTextDocument", err);
       }
     })
   );
@@ -168,9 +164,7 @@ export function activate(context: vscode.ExtensionContext): void {
           }
         }
       } catch (err) {
-        logError("onDidChangeConfiguration", err);
-        const msg = err instanceof Error ? err.message : String(err);
-        vscode.window.showErrorMessage(`Character Witness: ${msg}`);
+        handleError("onDidChangeConfiguration", err);
       }
     })
   );
@@ -185,9 +179,7 @@ export function activate(context: vscode.ExtensionContext): void {
           Promise.resolve(buildReplacementEdits(event.document, getCachedMatches))
         );
       } catch (err) {
-        logError("onWillSaveTextDocument", err);
-        const msg = err instanceof Error ? err.message : String(err);
-        vscode.window.showErrorMessage(`Character Witness: ${msg}`);
+        handleError("onWillSaveTextDocument", err);
       }
     })
   );

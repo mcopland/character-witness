@@ -1,4 +1,8 @@
-
+/**
+ * Regex-based string/comment region detection per language.
+ * Safety: all start/end values are UTF-16 code-unit offsets into the raw
+ * text string, the same coordinate space used by document.positionAt().
+ */
 
 export interface TextRegion {
   start: number;

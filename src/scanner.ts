@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { getCharacterName } from "./generated/unicode-names";
-import { titleCase, formatUPlus } from "./utils";
+import { titleCase, formatUPlus, toHex } from "./utils";
 import { getTextRegions, TextRegion } from "./regions";
 
 // ---------------------------------------------------------------------------
@@ -239,7 +239,7 @@ export function findNonAsciiCharacters(
 
       const startPos = document.positionAt(offset);
       const endPos = document.positionAt(offset + charLength);
-      const hex = codePoint.toString(16).toLowerCase().padStart(4, "0");
+      const hex = toHex(codePoint);
 
       matches.push({
         char,

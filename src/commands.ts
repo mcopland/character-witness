@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { getConfig } from "./config";
-import { parseCharacterEntry } from "./utils";
-import { logError } from "./logger";
+import { parseCharacterEntry, toHex } from "./utils";
+import { handleError } from "./logger";
 
 export async function addToAllowedCharacters(
   onComplete?: (editor: vscode.TextEditor) => void
@@ -70,8 +70,7 @@ export async function addToAllowedCharacters(
     for (const ch of charsToAdd) {
       if (!existingChars.has(ch)) {
         const cp = ch.codePointAt(0)!;
-        const hex = cp.toString(16).toLowerCase().padStart(4, "0");
-        newEntries.push("u+" + hex);
+        newEntries.push("u+" + toHex(cp));
       }
     }
 
@@ -83,8 +82,7 @@ export async function addToAllowedCharacters(
 
     const added = Array.from(charsToAdd).map((ch) => {
       const cp = ch.codePointAt(0)!;
-      const hex = cp.toString(16).toLowerCase().padStart(4, "0");
-      return "u+" + hex;
+      return "u+" + toHex(cp);
     });
     vscode.window.showInformationMessage(
       `Character Witness: Added ${added.join(", ")} to allowed list.`
@@ -95,8 +93,6 @@ export async function addToAllowedCharacters(
       onComplete(editor);
     }
   } catch (err) {
-    logError("addToAllowedCharacters", err);
-    const msg = err instanceof Error ? err.message : String(err);
-    vscode.window.showErrorMessage(`Character Witness: ${msg}`);
+    handleError("addToAllowedCharacters", err);
   }
 }

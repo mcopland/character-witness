@@ -32,3 +32,11 @@ export function titleCase(name: string): string {
 export function formatUPlus(hex: string): string {
   return "u+" + hex.toLowerCase();
 }
+
+/**
+ * Convert a Unicode code point number to a lowercase hex string,
+ * zero-padded to at least 4 digits.
+ */
+export function toHex(codePoint: number): string {
+  return codePoint.toString(16).padStart(4, "0");
+}

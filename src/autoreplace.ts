@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { getConfig } from "./config";
 import { NonAsciiMatch } from "./scanner";
-import { logError } from "./logger";
+import { handleError } from "./logger";
 
 export function buildReplacementEdits(
   document: vscode.TextDocument,
@@ -28,9 +28,7 @@ export function buildReplacementEdits(
     }
     return edits;
   } catch (err) {
-    logError("buildReplacementEdits", err);
-    const msg = err instanceof Error ? err.message : String(err);
-    vscode.window.showErrorMessage(`Character Witness: ${msg}`);
+    handleError("buildReplacementEdits", err);
     return [];
   }
 }
