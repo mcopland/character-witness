@@ -20,6 +20,135 @@
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "characterWitness.addToAllowedCharacters",
+        "title": "Character Witness: Add to Allowed Characters"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "characterWitness.addToAllowedCharacters",
+          "group": "1_modification@100",
+          "when": "editorTextFocus"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Character Witness",
+      "properties": {
+        "characterWitness.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable the Character Witness extension."
+        },
+        "characterWitness.decoration": {
+          "type": "object",
+          "description": "Customize the visual style of highlighted non-ASCII characters.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "examples": [
+            {
+              "textDecoration": "underline wavy red"
+            },
+            {
+              "backgroundColor": "rgba(255, 0, 0, 0.3)",
+              "overviewRulerColor": "#ff000099",
+              "textDecoration": "underline wavy red"
+            }
+          ]
+        },
+        "characterWitness.allowedCharacters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Characters to ignore (will not be highlighted or diagnosed). Accepts individual entries (\"u+00a3\") or ranges (\"u+2500 - u+2505\").",
+          "examples": [["u+00a3", "u+00a9", "u+2500 - u+257f"]]
+        },
+        "characterWitness.autoReplaceOnSave": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Automatically replace non-ASCII characters when saving a file. Replacement characters are defined in the **replacementMap** setting."
+        },
+        "characterWitness.replacementMap": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "markdownDescription": "Map of non-ASCII characters to their ASCII replacements. To be used with the **autoReplaceOnSave** setting.",
+          "examples": [{"u+2013": "-", "u+2018": "'", "u+201c": "\"", "u+201d": "\"" }]
+        },
+        "characterWitness.severityOverrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ]
+          },
+          "description": "Override the diagnostic severity for specific characters.",
+          "examples": [{ "u+00a0": "info", "u+200b": "warning" }]
+        },
+        "characterWitness.includeStrings": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to flag non-ASCII characters inside string literals. When false, characters within strings are ignored."
+        },
+        "characterWitness.includeComments": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to flag non-ASCII characters inside comments. When false, characters within comments are ignored."
+        },
+        "characterWitness.diagnosticSeverities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["error", "warning", "info"]
+          },
+          "default": ["error", "warning", "info"],
+          "description": "Which severity levels are shown in the Problems panel. Remove levels to suppress those diagnostics while keeping decorations. Use [] to disable all diagnostics."
+        },
+        "characterWitness.codePointFormat": {
+          "type": "string",
+          "enum": ["u+", "\\u", "\\u{}", "0x"],
+          "enumDescriptions": [
+            "u+2019 Unicode U+ notation (default)",
+            "\\u2019 JavaScript escape notation (4 hex digits)",
+            "\\u{2019} JavaScript ES6 brace notation",
+            "0x2019 C-style hex notation"
+          ],
+          "default": "u+",
+          "description": "How code points are displayed in hover text, diagnostics, and notifications. Also controls the format written to settings when using 'Add to Allowed Characters'."
+        },
+        "characterWitness.codePointCase": {
+          "type": "string",
+          "enum": ["lower", "upper"],
+          "enumDescriptions": [
+            "Lowercase hex digits, e.g. u+25ab",
+            "Uppercase hex digits, e.g. U+25AB"
+          ],
+          "default": "lower",
+          "description": "Whether hex digits (and the 'u+' prefix) are displayed in lower or uppercase."
+        },
+        "characterWitness.ignoredPaths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Array of regular expressions matched against the file's full path (forward slashes, cross-platform). Files with a matching path are excluded from scanning, decorations, diagnostics, and auto-replace.",
+          "examples": [
+            ["node_modules/", "\\.min\\.js$", "(dist|build)/"],
+            ["\\.generated\\.ts$"]
+          ]
+        }
+      }
+    }
+  },
   "scripts": {
     "compile": "tsc -p ./",
     "generate": "ts-node --project scripts/tsconfig.json scripts/generate-unicode-data.ts",
@@ -29,7 +158,7 @@
     "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
-    "@types/node": "^25.3.2",
+"@types/node": "^25.3.2",
     "@types/vscode": "^1.109.0",
     "@unicode/unicode-16.0.0": "^1.6.16",
     "@vscode/vsce": "^3.7.1",
