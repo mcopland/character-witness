@@ -1,0 +1,210 @@
+import * as assert from "assert";
+
+vi.mock("vscode", () => ({}));
+
+// ---------------------------------------------------------------------------
+// These tests exercise pure functions that don't require the VS Code API.
+// Run with:  npx vitest run
+// ---------------------------------------------------------------------------
+
+import { parseCharacterEntry, parseCharacterEntries, titleCase, formatCodePoint, toHex } from "../utils";
+import {
+  getCharacterName,
+  UNICODE_VERSION,
+} from "../generated/unicode-names";
+import { formatGroupedDiagnosticMessage, NonAsciiMatch } from "../scanner";
+
+describe("parseCharacterEntry", () => {
+  test("u+HHHH notation", () => {
+    assert.strictEqual(parseCharacterEntry("U+00A3"), "£");
+    assert.strictEqual(parseCharacterEntry("u+2014"), "—");
+    assert.strictEqual(parseCharacterEntry("U+1F600"), "\u{1f600}");
+  });
+
+  test("empty string returns undefined", () => {
+    assert.strictEqual(parseCharacterEntry(""), undefined);
+  });
+
+  test("literal characters are rejected", () => {
+    assert.strictEqual(parseCharacterEntry("£"), undefined);
+    assert.strictEqual(parseCharacterEntry("©"), undefined);
+    assert.strictEqual(parseCharacterEntry("A"), undefined);
+  });
+
+  test("accepts \\uHHHH format", () => assert.strictEqual(parseCharacterEntry("\\u00a3"), "\u00a3"));
+  test("accepts \\u{HHHH} format", () => assert.strictEqual(parseCharacterEntry("\\u{00a3}"), "\u00a3"));
+  test("accepts 0xHHHH format", () => assert.strictEqual(parseCharacterEntry("0x00a3"), "\u00a3"));
+  test("accepts 0XHHHH format", () => assert.strictEqual(parseCharacterEntry("0X00a3"), "\u00a3"));
+  test("\\uHHHH requires exactly 4 digits", () => assert.strictEqual(parseCharacterEntry("\\u219"), undefined));
+
+  test("unrecognized input returns undefined", () => {
+    assert.strictEqual(parseCharacterEntry("hello"), undefined);
+    assert.strictEqual(parseCharacterEntry("\\xA3"), undefined);
+  });
+});
+
+describe("parseCharacterEntries", () => {
+  test("single u+HHHH entry returns one-element array", () => {
+    assert.deepStrictEqual(parseCharacterEntries("u+2014"), ["—"]);
+  });
+
+  test("range returns all characters inclusive", () => {
+    const result = parseCharacterEntries("u+2500 - u+2502");
+    assert.deepStrictEqual(result, ["\u2500", "\u2501", "\u2502"]);
+  });
+
+  test("range with spaces around dash", () => {
+    assert.strictEqual(parseCharacterEntries("u+2500 - u+2500").length, 1);
+  });
+
+  test("single-element range (start equals end)", () => {
+    assert.deepStrictEqual(parseCharacterEntries("u+2500 - u+2500"), ["\u2500"]);
+  });
+
+  test("inverted range (start > end) returns empty array", () => {
+    assert.deepStrictEqual(parseCharacterEntries("u+2505 - u+2500"), []);
+  });
+
+  test("unrecognized input returns empty array", () => {
+    assert.deepStrictEqual(parseCharacterEntries("hello"), []);
+    assert.deepStrictEqual(parseCharacterEntries(""), []);
+  });
+
+  test("range with \\u format", () => assert.strictEqual(parseCharacterEntries("\\u2018 - \\u2020").length, 9));
+  test("range with 0x format", () => assert.strictEqual(parseCharacterEntries("0x2018 - 0x2020").length, 9));
+  test("range with mixed formats", () => assert.strictEqual(parseCharacterEntries("u+2018 - 0x2020").length, 9));
+});
+
+describe("titleCase", () => {
+  test("converts uppercase Unicode names", () => {
+    assert.strictEqual(titleCase("EM DASH"), "Em Dash");
+    assert.strictEqual(
+      titleCase("LEFT SINGLE QUOTATION MARK"),
+      "Left Single Quotation Mark"
+    );
+    assert.strictEqual(titleCase("COPYRIGHT SIGN"), "Copyright Sign");
+  });
+});
+
+describe("toHex", () => {
+  test("BMP code point is padded to 4 hex digits", () => {
+    assert.strictEqual(toHex(0x00e9), "00e9");
+    assert.strictEqual(toHex(0x2014), "2014");
+  });
+
+  test("supplementary code point produces 5+ digit hex", () => {
+    assert.strictEqual(toHex(0x1f600), "1f600");
+  });
+
+  test("returns lowercase hex", () => {
+    assert.strictEqual(toHex(0xFFFd), "fffd");
+    assert.strictEqual(toHex(0xFF21), "ff21");
+  });
+});
+
+describe("formatCodePoint", () => {
+  test("u+ format lower case", () => assert.strictEqual(formatCodePoint("00e9", "u+", "lower"), "u+00e9"));
+  test("u+ format upper case", () => assert.strictEqual(formatCodePoint("00e9", "u+", "upper"), "U+00E9"));
+  test("\\u format lower case", () => assert.strictEqual(formatCodePoint("00e9", "\\u", "lower"), "\\u00e9"));
+  test("\\u format upper case", () => assert.strictEqual(formatCodePoint("00e9", "\\u", "upper"), "\\u00E9"));
+  test("\\u{} format lower case", () => assert.strictEqual(formatCodePoint("1f600", "\\u{}", "lower"), "\\u{1f600}"));
+  test("\\u{} format upper case", () => assert.strictEqual(formatCodePoint("1f600", "\\u{}", "upper"), "\\u{1F600}"));
+  test("0x format lower case", () => assert.strictEqual(formatCodePoint("00e9", "0x", "lower"), "0x00e9"));
+  test("0x format upper case", () => assert.strictEqual(formatCodePoint("00e9", "0x", "upper"), "0x00E9"));
+  test("supplementary code point (5 hex digits)", () => {
+    assert.strictEqual(formatCodePoint("1f600", "u+", "upper"), "U+1F600");
+    assert.strictEqual(formatCodePoint("1f600", "u+", "lower"), "u+1f600");
+  });
+});
+
+describe("Unicode name lookups", () => {
+  test("UNICODE_VERSION is pinned", () => {
+    assert.strictEqual(UNICODE_VERSION, "16.0.0");
+  });
+
+  test("common symbols", () => {
+    assert.strictEqual(getCharacterName(0x2014), "EM DASH");
+    assert.strictEqual(getCharacterName(0x2018), "LEFT SINGLE QUOTATION MARK");
+    assert.strictEqual(getCharacterName(0x00a9), "COPYRIGHT SIGN");
+    assert.strictEqual(getCharacterName(0x00f7), "DIVISION SIGN");
+    assert.strictEqual(getCharacterName(0x00a3), "POUND SIGN");
+    assert.strictEqual(getCharacterName(0x00e9), "LATIN SMALL LETTER E WITH ACUTE");
+  });
+
+  test("CJK unified ideographs (algorithmic)", () => {
+    assert.strictEqual(
+      getCharacterName(0x4e00),
+      "CJK UNIFIED IDEOGRAPH-4E00"
+    );
+    assert.strictEqual(
+      getCharacterName(0x9fff),
+      "CJK UNIFIED IDEOGRAPH-9FFF"
+    );
+  });
+
+  test("Hangul syllables (algorithmic)", () => {
+    assert.strictEqual(getCharacterName(0xac00), "HANGUL SYLLABLE GA");
+    assert.strictEqual(getCharacterName(0xd7a3), "HANGUL SYLLABLE HIH");
+  });
+
+  test("control character aliases", () => {
+    assert.strictEqual(getCharacterName(0x0085), "NEXT LINE");
+    assert.strictEqual(getCharacterName(0x008a), "LINE TABULATION SET");
+  });
+
+  test("correction aliases override original name", () => {
+    // U+01A2 was corrected from LATIN CAPITAL LETTER OI to LATIN CAPITAL LETTER GHA
+    assert.strictEqual(
+      getCharacterName(0x01a2),
+      "LATIN CAPITAL LETTER GHA"
+    );
+  });
+
+  test("ASCII code points return undefined", () => {
+    assert.strictEqual(getCharacterName(0x41), undefined);
+    assert.strictEqual(getCharacterName(0x7f), undefined);
+  });
+});
+
+function makeMatch(char: string): NonAsciiMatch {
+  return { char, codePoint: char.codePointAt(0)!, hex: "00b7", unicodeName: undefined, range: undefined as any };
+}
+
+describe("formatGroupedDiagnosticMessage", () => {
+  test("single match delegates to single-char format", () => {
+    const m = { ...makeMatch("·"), unicodeName: "MIDDLE DOT" };
+    assert.strictEqual(
+      formatGroupedDiagnosticMessage([m]),
+      "Middle Dot '·' U+00B7"
+    );
+  });
+
+  test("two matches produces compact array format", () => {
+    assert.strictEqual(
+      formatGroupedDiagnosticMessage([makeMatch("·"), makeMatch("—")]),
+      "2 non-ASCII characters: ['·', '—']"
+    );
+  });
+
+  test("count reflects number of matches", () => {
+    const matches = ["·", "·", "©", "®", "™", "°"].map(makeMatch);
+    assert.ok(
+      formatGroupedDiagnosticMessage(matches).startsWith(
+        "6 non-ASCII characters: "
+      )
+    );
+  });
+
+  test("array contains each char in order", () => {
+    const result = formatGroupedDiagnosticMessage([makeMatch("·"), makeMatch("©"), makeMatch("®")]);
+    assert.strictEqual(result, "3 non-ASCII characters: ['·', '©', '®']");
+  });
+
+  test("single match with non-default format and case", () => {
+    const m = { ...makeMatch("·"), unicodeName: "MIDDLE DOT" };
+    assert.strictEqual(
+      formatGroupedDiagnosticMessage([m], "0x", "upper"),
+      "Middle Dot '·' 0x00B7"
+    );
+  });
+});
