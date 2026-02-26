@@ -52,7 +52,7 @@ function updateEditor(editor: vscode.TextEditor): void {
     const decType = ensureDecorationType();
     const decorationOptions: vscode.DecorationOptions[] = matches.map((m) => ({
       range: m.range,
-      hoverMessage: formatHoverMarkdown(m),
+      hoverMessage: formatHoverMarkdown(m, config.codePointFormat, config.codePointCase),
     }));
     editor.setDecorations(decType, decorationOptions);
 
@@ -82,7 +82,7 @@ function updateEditor(editor: vscode.TextEditor): void {
 
       const diag = new vscode.Diagnostic(
         range,
-        formatGroupedDiagnosticMessage(group),
+        formatGroupedDiagnosticMessage(group, config.codePointFormat, config.codePointCase),
         worstSeverity
       );
       diag.source = "Character Witness";

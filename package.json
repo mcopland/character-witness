@@ -133,7 +133,7 @@
             "Lowercase hex digits, e.g. u+25ab",
             "Uppercase hex digits, e.g. U+25AB"
           ],
-          "default": "lower",
+          "default": "upper",
           "description": "Whether hex digits (and the 'u+' prefix) are displayed in lower or uppercase."
         },
         "characterWitness.ignoredPaths": {
@@ -158,7 +158,7 @@
     "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
-"@types/node": "^25.3.2",
+    "@types/node": "^25.3.2",
     "@types/vscode": "^1.109.0",
     "@unicode/unicode-16.0.0": "^1.6.16",
     "@vscode/vsce": "^3.7.1",

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { getCharacterName } from "./generated/unicode-names";
-import { titleCase, formatUPlus, toHex } from "./utils";
+import { titleCase, formatCodePoint, toHex } from "./utils";
 import { getTextRegions, TextRegion } from "./regions";
 
 // ---------------------------------------------------------------------------
@@ -156,49 +156,46 @@ export interface NonAsciiMatch {
 
 /**
  * Build the display label for a match, e.g.:
- *   <Name> '<Character>' (<Code>) detected
+ *   <Name> '<Character>' U+HHHH
  */
-function formatDiagnosticMessage(match: NonAsciiMatch): string {
-  const uPlus = formatUPlus(match.hex);
+function formatDiagnosticMessage(
+  match: NonAsciiMatch,
+  format: string = "u+",
+  caseType: string = "upper"
+): string {
+  const code = formatCodePoint(match.hex, format, caseType);
   if (match.unicodeName) {
-    return (
-      titleCase(match.unicodeName) +
-      " '" +
-      match.char +
-      "' (" +
-      uPlus +
-      ") detected"
-    );
+    return titleCase(match.unicodeName) + " '" + match.char + "' " + code;
   }
-  return "Character '" + match.char + "' (" + uPlus + ") detected";
+  return "Character '" + match.char + "' " + code;
 }
 
 /**
  * Build a single diagnostic message for a group of matches on the same line.
  * Single match: same as formatDiagnosticMessage.
- * Multiple matches: e.g. "3 non-ASCII characters detected: ..."
+ * Multiple matches: e.g. "3 non-ASCII characters: ['x', 'y', 'z']"
  */
-export function formatGroupedDiagnosticMessage(matches: NonAsciiMatch[]): string {
-  if (matches.length === 1) return formatDiagnosticMessage(matches[0]);
-
-  const parts = matches.map((m) => {
-    const uPlus = formatUPlus(m.hex);
-    if (m.unicodeName) {
-      return titleCase(m.unicodeName) + " '" + m.char + "' (" + uPlus + ")";
-    }
-    return "'" + m.char + "' (" + uPlus + ")";
-  });
-
-  return matches.length + " non-ASCII characters detected: " + parts.join(", ");
+export function formatGroupedDiagnosticMessage(
+  matches: NonAsciiMatch[],
+  format: string = "u+",
+  caseType: string = "upper"
+): string {
+  if (matches.length === 1) return formatDiagnosticMessage(matches[0], format, caseType);
+  const parts = matches.map((m) => `'${m.char}'`);
+  return `${matches.length} non-ASCII characters: [${parts.join(", ")}]`;
 }
 
-export function formatHoverMarkdown(match: NonAsciiMatch): vscode.MarkdownString {
-  const uPlus = formatUPlus(match.hex);
+export function formatHoverMarkdown(
+  match: NonAsciiMatch,
+  format: string = "u+",
+  caseType: string = "upper"
+): vscode.MarkdownString {
+  const code = formatCodePoint(match.hex, format, caseType);
   const parts: string[] = [];
   if (match.unicodeName) {
     parts.push("**" + titleCase(match.unicodeName) + "**");
   }
-  parts.push("`" + match.char + uPlus + "`");
+  parts.push("`" + match.char + " " + code + "`");
   return new vscode.MarkdownString(parts.join("  \n"));
 }
 

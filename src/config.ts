@@ -69,6 +69,8 @@ export interface ExtensionConfig {
   severityOverrides: Map<string, vscode.DiagnosticSeverity>;
   includeStrings: boolean;
   includeComments: boolean;
+  codePointFormat: string;
+  codePointCase: string;
 }
 
 function parseSeverityString(value: string): vscode.DiagnosticSeverity | undefined {
@@ -133,6 +135,8 @@ function readConfig(): ExtensionConfig {
     severityOverrides: parseSeverityOverrides(rawSeverityOverrides),
     includeStrings: cfg.get<boolean>("includeStrings", true),
     includeComments: cfg.get<boolean>("includeComments", true),
+    codePointFormat: cfg.get<string>("codePointFormat", "u+"),
+    codePointCase: cfg.get<string>("codePointCase", "upper"),
   };
 }
 
