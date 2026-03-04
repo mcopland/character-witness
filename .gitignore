@@ -1,6 +1,6 @@
 # Environment
 .claude/
-.git/
+.git*
 .vscode/*
 
 # Build
