@@ -13,6 +13,8 @@ import {
   UNICODE_VERSION,
 } from "../generated/unicode-names";
 import { formatGroupedDiagnosticMessage, NonAsciiMatch } from "../scanner";
+import { compileIgnoredPaths } from "../config";
+import { isIgnoredDocument } from "../extension";
 
 describe("parseCharacterEntry", () => {
   test("u+HHHH notation", () => {
@@ -206,5 +208,44 @@ describe("formatGroupedDiagnosticMessage", () => {
       formatGroupedDiagnosticMessage([m], "0x", "upper"),
       "Middle Dot '·' 0x00B7"
     );
+  });
+});
+
+describe("compileIgnoredPaths", () => {
+  test("glob with extension wildcard matches filename", () => {
+    const result = compileIgnoredPaths(["unicode-names.*"]);
+    assert.strictEqual(result.length, 1);
+    assert.ok(result[0].test("unicode-names.ts"));
+  });
+
+  test("double-star glob matches path containing segment", () => {
+    const result = compileIgnoredPaths(["**/node_modules/**"]);
+    assert.ok(result[0].test("/home/user/project/node_modules/pkg/index.js"));
+  });
+
+  test("returns empty array for empty input", () => {
+    assert.deepStrictEqual(compileIgnoredPaths([]), []);
+  });
+});
+
+describe("isIgnoredDocument", () => {
+  function makeDoc(fsPath: string): any {
+    return { uri: { fsPath } };
+  }
+
+  test("returns false when ignoredPaths is empty", () => {
+    assert.strictEqual(isIgnoredDocument(makeDoc("/foo/bar.ts"), []), false);
+  });
+
+  test("returns true when a pattern matches the normalized path", () => {
+    assert.strictEqual(isIgnoredDocument(makeDoc("/foo/bar.ts"), [/bar\.ts$/]), true);
+  });
+
+  test("returns false when no pattern matches", () => {
+    assert.strictEqual(isIgnoredDocument(makeDoc("/foo/bar.ts"), [/baz\.ts$/]), false);
+  });
+
+  test("normalizes backslashes to forward slashes before matching", () => {
+    assert.strictEqual(isIgnoredDocument(makeDoc("C:\\foo\\bar.ts"), [/foo\/bar\.ts$/]), true);
   });
 });
