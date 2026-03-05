@@ -71,6 +71,30 @@ export interface ExtensionConfig {
   includeComments: boolean;
   codePointFormat: string;
   codePointCase: string;
+  ignoredPaths: RegExp[];
+}
+
+function globToRegExp(glob: string): RegExp {
+  let result = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*" && glob[i + 1] === "*") {
+      result += ".*";
+      i++;
+      if (glob[i + 1] === "/") i++;
+    } else if (c === "*") {
+      result += "[^/]*";
+    } else if (c === "?") {
+      result += "[^/]";
+    } else {
+      result += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(result);
+}
+
+export function compileIgnoredPaths(patterns: string[]): RegExp[] {
+  return patterns.map(globToRegExp);
 }
 
 function parseSeverityString(value: string): vscode.DiagnosticSeverity | undefined {
@@ -137,6 +161,7 @@ function readConfig(): ExtensionConfig {
     includeComments: cfg.get<boolean>("includeComments", true),
     codePointFormat: cfg.get<string>("codePointFormat", "u+"),
     codePointCase: cfg.get<string>("codePointCase", "upper"),
+    ignoredPaths: compileIgnoredPaths(cfg.get<string[]>("ignoredPaths", [])),
   };
 }
 

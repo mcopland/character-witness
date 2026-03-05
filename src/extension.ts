@@ -19,6 +19,11 @@ interface ScanCacheEntry {
 
 const scanCache = new Map<string, ScanCacheEntry>();
 
+export function isIgnoredDocument(document: vscode.TextDocument, ignoredPaths: RegExp[]): boolean {
+  const normalized = document.uri.fsPath.replace(/\\/g, "/");
+  return ignoredPaths.some((re) => re.test(normalized));
+}
+
 function getCachedMatches(
   document: vscode.TextDocument,
   allowedCharacters: Set<string>,
@@ -43,6 +48,11 @@ function updateEditor(editor: vscode.TextEditor): void {
     const config = getConfig();
 
     if (!config.enable) {
+      clearEditor(editor);
+      return;
+    }
+
+    if (isIgnoredDocument(editor.document, config.ignoredPaths)) {
       clearEditor(editor);
       return;
     }
@@ -175,6 +185,7 @@ export function activate(context: vscode.ExtensionContext): void {
       try {
         const config = getConfig();
         if (!config.enable) return;
+        if (isIgnoredDocument(event.document, config.ignoredPaths)) return;
         event.waitUntil(
           Promise.resolve(buildReplacementEdits(event.document, getCachedMatches))
         );
