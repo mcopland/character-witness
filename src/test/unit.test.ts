@@ -1,6 +1,20 @@
 import * as assert from "assert";
+import * as vscode from "vscode";
 
-vi.mock("vscode", () => ({}));
+vi.mock("vscode", () => ({
+  Range: class {
+    constructor(
+      public start: { line: number; character: number },
+      public end: { line: number; character: number },
+    ) {}
+  },
+  Position: class {
+    constructor(
+      public line: number,
+      public character: number,
+    ) {}
+  },
+}));
 
 // ---------------------------------------------------------------------------
 // These tests exercise pure functions that don't require the VS Code API.
@@ -190,7 +204,16 @@ describe("Unicode name lookups", () => {
 });
 
 function makeMatch(char: string): NonAsciiMatch {
-  return { char, codePoint: char.codePointAt(0)!, hex: "00b7", unicodeName: undefined, range: undefined as any };
+  return {
+    char,
+    codePoint: char.codePointAt(0)!,
+    hex: "00b7",
+    unicodeName: undefined,
+    range: new vscode.Range(
+      new vscode.Position(0, 0),
+      new vscode.Position(0, 1),
+    ),
+  };
 }
 
 describe("formatGroupedDiagnosticMessage", () => {
