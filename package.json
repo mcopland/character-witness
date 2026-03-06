@@ -151,19 +151,28 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
+    "format": "prettier --write src/**/*.ts",
     "generate": "ts-node --project scripts/tsconfig.json scripts/generate-unicode-data.ts",
+    "lint": "eslint src/**/*.ts",
     "package": "vsce package",
     "test:unit": "vitest run",
     "vscode:prepublish": "npm run generate && npm run compile",
     "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^25.3.3",
     "@types/vscode": "^1.109.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
     "@unicode/unicode-16.0.0": "^1.6.16",
     "@vscode/vsce": "^3.7.1",
+    "eslint": "^10.0.2",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1",
     "vitest": "^4.0.18"
   }
 }
