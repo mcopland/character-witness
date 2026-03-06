@@ -17,6 +17,10 @@ export default defineConfig(
     },
   },
   {
-    ignores: ["node_modules/**", "out/**"],
+    ignores: [
+      "node_modules/**",
+      "src/test/non-ascii-character-test-file.js",
+      "out/**",
+    ],
   },
 );
