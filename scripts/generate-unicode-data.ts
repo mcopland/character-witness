@@ -1,8 +1,7 @@
 #!/usr/bin/env node
+import namesMap from "@unicode/unicode-16.0.0/Names";
 import * as fs from "fs";
 import * as path from "path";
-
-const namesMap: Map<number, string> = require("@unicode/unicode-16.0.0/Names");
 
 const UNICODE_VERSION = "16.0.0";
 
