@@ -164,7 +164,21 @@ function readConfig(): ExtensionConfig {
 
   const rawReplacements = cfg.get<Record<string, string>>("replacementMap", {});
 
-  const rawSeverityOverrides = cfg.get<Record<string, string>>("severityOverrides", {});
+  const rawSeverityOverrides = cfg.get<Record<string, string>>(
+    "severityOverrides",
+    {},
+  );
+
+  const rawDiagnosticSeverities = cfg.get<string[]>("diagnosticSeverities", [
+    "error",
+    "warning",
+    "info",
+  ]);
+  const diagnosticSeverities = new Set<vscode.DiagnosticSeverity>();
+  for (const s of rawDiagnosticSeverities) {
+    const severity = parseSeverityString(s);
+    if (severity !== undefined) diagnosticSeverities.add(severity);
+  }
 
   return {
     enable: cfg.get<boolean>("enable", true),
@@ -178,6 +192,7 @@ function readConfig(): ExtensionConfig {
     codePointFormat: cfg.get<string>("codePointFormat", "u+"),
     codePointCase: cfg.get<string>("codePointCase", "upper"),
     ignoredPaths: compileIgnoredPaths(cfg.get<string[]>("ignoredPaths", [])),
+    diagnosticSeverities,
   };
 }
 
