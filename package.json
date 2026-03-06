@@ -67,7 +67,13 @@
             "type": "string"
           },
           "description": "Characters to ignore (will not be highlighted or diagnosed). Accepts individual entries (\"u+00a3\") or ranges (\"u+2500 - u+2505\").",
-          "examples": [["u+00a3", "u+00a9", "u+2500 - u+257f"]]
+          "examples": [
+            [
+              "u+00a3",
+              "u+00a9",
+              "u+2500 - u+257f"
+            ]
+          ]
         },
         "characterWitness.autoReplaceOnSave": {
           "type": "boolean",
@@ -80,7 +86,14 @@
             "type": "string"
           },
           "markdownDescription": "Map of non-ASCII characters to their ASCII replacements. To be used with the **autoReplaceOnSave** setting.",
-          "examples": [{"u+2013": "-", "u+2018": "'", "u+201c": "\"", "u+201d": "\"" }]
+          "examples": [
+            {
+              "u+2013": "-",
+              "u+2018": "'",
+              "u+201c": "\"",
+              "u+201d": "\""
+            }
+          ]
         },
         "characterWitness.severityOverrides": {
           "type": "object",
@@ -93,7 +106,12 @@
             ]
           },
           "description": "Override the diagnostic severity for specific characters.",
-          "examples": [{ "u+00a0": "info", "u+200b": "warning" }]
+          "examples": [
+            {
+              "u+00a0": "info",
+              "u+200b": "warning"
+            }
+          ]
         },
         "characterWitness.includeStrings": {
           "type": "boolean",
@@ -109,14 +127,27 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["error", "warning", "info"]
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ]
           },
-          "default": ["error", "warning", "info"],
+          "default": [
+            "error",
+            "warning",
+            "info"
+          ],
           "description": "Which severity levels are shown in the Problems panel. Remove levels to suppress those diagnostics while keeping decorations. Use [] to disable all diagnostics."
         },
         "characterWitness.codePointFormat": {
           "type": "string",
-          "enum": ["u+", "\\u", "\\u{}", "0x"],
+          "enum": [
+            "u+",
+            "\\u",
+            "\\u{}",
+            "0x"
+          ],
           "enumDescriptions": [
             "u+2019 Unicode U+ notation (default)",
             "\\u2019 JavaScript escape notation (4 hex digits)",
@@ -128,7 +159,10 @@
         },
         "characterWitness.codePointCase": {
           "type": "string",
-          "enum": ["lower", "upper"],
+          "enum": [
+            "lower",
+            "upper"
+          ],
           "enumDescriptions": [
             "Lowercase hex digits, e.g. u+25ab",
             "Uppercase hex digits, e.g. U+25AB"
@@ -138,12 +172,20 @@
         },
         "characterWitness.ignoredPaths": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Array of glob patterns matched against the file's full path (forward slashes, cross-platform). Files with a matching path are excluded from scanning, decorations, diagnostics, and auto-replace.",
           "examples": [
-            ["**/node_modules/**", "**/*.min.js", "{dist,build}/**"],
-            ["**/*.generated.ts"]
+            [
+              "**/node_modules/**",
+              "**/*.min.js",
+              "{dist,build}/**"
+            ],
+            [
+              "**/*.generated.ts"
+            ]
           ]
         }
       }

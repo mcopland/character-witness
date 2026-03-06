@@ -44,7 +44,8 @@ function buildPatterns(languageId: string): LanguagePatterns {
       return {
         // group1: line comment, group2: block comment,
         // group3: template literal, group4: double-quoted string, group5: single-quoted string
-        regex: /(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)|(`(?:[^`\\]|\\.)*`)|(\"(?:[^\"\\]|\\.)*\")|('(?:[^'\\]|\\.)*')/g,
+        regex:
+          /(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)|(`(?:[^`\\]|\\.)*`)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')/g,
         groupTypes: ["comment", "comment", "string", "string", "string"],
       };
 
@@ -52,7 +53,8 @@ function buildPatterns(languageId: string): LanguagePatterns {
       return {
         // group1: line comment, group2: triple-double string,
         // group3: triple-single string, group4: double-quoted string, group5: single-quoted string
-        regex: /(#[^\n]*)|(\"\"\"[\s\S]*?\"\"\")|('''[\s\S]*?''')|(\"(?:[^\"\\]|\\.)*\")|('(?:[^'\\]|\\.)*')/g,
+        regex:
+          /(#[^\n]*)|("""[\s\S]*?""")|('''[\s\S]*?''')|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')/g,
         groupTypes: ["comment", "string", "string", "string", "string"],
       };
 
@@ -63,7 +65,7 @@ function buildPatterns(languageId: string): LanguagePatterns {
     case "coffeescript":
     case "yaml":
       return {
-        regex: /(#[^\n]*)|(\"(?:[^\"\\]|\\.)*\")|('(?:[^'\\]|\\.)*')/g,
+        regex: /(#[^\n]*)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')/g,
         groupTypes: ["comment", "string", "string"],
       };
 
@@ -73,7 +75,7 @@ function buildPatterns(languageId: string): LanguagePatterns {
     case "vue":
     case "svelte":
       return {
-        regex: /(<!--[\s\S]*?-->)|(\"(?:[^\"\\]|\\.)*\")|('(?:[^'\\]|\\.)*')/g,
+        regex: /(<!--[\s\S]*?-->)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')/g,
         groupTypes: ["comment", "string", "string"],
       };
 
@@ -85,13 +87,14 @@ function buildPatterns(languageId: string): LanguagePatterns {
 
     case "lua":
       return {
-        regex: /(--\[\[[\s\S]*?\]\])|(--[^\n]*)|(\"(?:[^\"\\]|\\.)*\")|('(?:[^'\\]|\\.)*')/g,
+        regex:
+          /(--\[\[[\s\S]*?\]\])|(--[^\n]*)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')/g,
         groupTypes: ["comment", "comment", "string", "string"],
       };
 
     default:
       return {
-        regex: /(\"(?:[^\"\\]|\\.)*\")|('(?:[^'\\]|\\.)*')/g,
+        regex: /("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')/g,
         groupTypes: ["string", "string"],
       };
   }

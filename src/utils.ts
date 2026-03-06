@@ -1,5 +1,3 @@
-
-
 /**
  * Normalize a settings-supplied character string into its literal character.
  *
@@ -65,9 +63,7 @@ export function parseCharacterEntries(entry: string): string[] {
  * "EM DASH" → "Em Dash"
  */
 export function titleCase(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/(?:^|\s)\S/g, (ch) => ch.toUpperCase());
+  return name.toLowerCase().replace(/(?:^|\s)\S/g, ch => ch.toUpperCase());
 }
 
 /**
@@ -92,7 +88,11 @@ export function toHex(codePoint: number): string {
  * @param format    One of "u+", "\\u", "\\u{}", "0x"
  * @param caseType  "upper" or "lower"
  */
-export function formatCodePoint(hex: string, format: string, caseType: string): string {
+export function formatCodePoint(
+  hex: string,
+  format: string,
+  caseType: string,
+): string {
   const h = caseType === "upper" ? hex.toUpperCase() : hex.toLowerCase();
   switch (format) {
     case "\\u":

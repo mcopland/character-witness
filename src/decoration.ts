@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { getConfig, buildDecorationRenderOptions } from "./config";
+import { buildDecorationRenderOptions, getConfig } from "./config";
 
 let decorationType: vscode.TextEditorDecorationType | undefined;
 

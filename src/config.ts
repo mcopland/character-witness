@@ -1,20 +1,20 @@
 import * as vscode from "vscode";
-import { parseCharacterEntry } from "./utils";
 import { log } from "./logger";
 import { ERROR_LEVEL_CODEPOINTS } from "./scanner";
+import { parseCharacterEntry } from "./utils";
 
 const DEFAULT_DECORATION: Record<string, string> = {
-  "backgroundColor":    "rgba(125, 249, 255, 0.2)",
-  "borderColor":        "rgba(125, 249, 255, 0.1)",
-  "borderRadius":       "4px",
-  "borderStyle":        "solid",
-  "borderWidth":        "2px",
-  "color":              "rgba(125, 249, 255, 1)",
-  "cursor":             "help",
-  "fontStyle":          "normal",
-  "fontWeight":         "600",
-  "opacity":            "1",
-  "overviewRulerColor": "",
+  backgroundColor: "rgba(125, 249, 255, 0.2)",
+  borderColor: "rgba(125, 249, 255, 0.1)",
+  borderRadius: "4px",
+  borderStyle: "solid",
+  borderWidth: "2px",
+  color: "rgba(125, 249, 255, 1)",
+  cursor: "help",
+  fontStyle: "normal",
+  fontWeight: "600",
+  opacity: "1",
+  overviewRulerColor: "",
 };
 
 function parseOverviewRulerLane(value: string): vscode.OverviewRulerLane {
@@ -32,12 +32,14 @@ function parseOverviewRulerLane(value: string): vscode.OverviewRulerLane {
 }
 
 export function buildDecorationRenderOptions(
-  style: Record<string, string>
+  style: Record<string, string>,
 ): vscode.DecorationRenderOptions {
   const { overviewRulerLane, ...rest } = style;
   const opts = rest as vscode.DecorationRenderOptions;
   if (rest.overviewRulerColor) {
-    opts.overviewRulerLane = parseOverviewRulerLane(overviewRulerLane ?? "Center");
+    opts.overviewRulerLane = parseOverviewRulerLane(
+      overviewRulerLane ?? "Center",
+    );
   }
   return opts;
 }
@@ -47,9 +49,7 @@ export interface ReplacementEntry {
   to: string;
 }
 
-function parseReplacementMap(
-  raw: Record<string, string>
-): ReplacementEntry[] {
+function parseReplacementMap(raw: Record<string, string>): ReplacementEntry[] {
   const entries: ReplacementEntry[] = [];
   for (const [key, value] of Object.entries(raw)) {
     const fromChar = parseCharacterEntry(key);
@@ -72,6 +72,7 @@ export interface ExtensionConfig {
   codePointFormat: string;
   codePointCase: string;
   ignoredPaths: RegExp[];
+  diagnosticSeverities: Set<vscode.DiagnosticSeverity>;
 }
 
 function globToRegExp(glob: string): RegExp {
@@ -97,16 +98,24 @@ export function compileIgnoredPaths(patterns: string[]): RegExp[] {
   return patterns.map(globToRegExp);
 }
 
-function parseSeverityString(value: string): vscode.DiagnosticSeverity | undefined {
+function parseSeverityString(
+  value: string,
+): vscode.DiagnosticSeverity | undefined {
   switch (value.toLowerCase()) {
-    case "error": return vscode.DiagnosticSeverity.Error;
-    case "warning": return vscode.DiagnosticSeverity.Warning;
-    case "info": return vscode.DiagnosticSeverity.Information;
-    default: return undefined;
+    case "error":
+      return vscode.DiagnosticSeverity.Error;
+    case "warning":
+      return vscode.DiagnosticSeverity.Warning;
+    case "info":
+      return vscode.DiagnosticSeverity.Information;
+    default:
+      return undefined;
   }
 }
 
-function parseSeverityOverrides(raw: Record<string, string>): Map<string, vscode.DiagnosticSeverity> {
+function parseSeverityOverrides(
+  raw: Record<string, string>,
+): Map<string, vscode.DiagnosticSeverity> {
   const map = new Map<string, vscode.DiagnosticSeverity>();
   for (const [key, value] of Object.entries(raw)) {
     const char = parseCharacterEntry(key);
@@ -122,12 +131,16 @@ function parseSeverityOverrides(raw: Record<string, string>): Map<string, vscode
  * Determine the diagnostic severity for a given character.
  * Checks user overrides first, then the hardcoded error-level set, then defaults to Information.
  */
-export function getCharacterSeverity(char: string, config: ExtensionConfig): vscode.DiagnosticSeverity {
+export function getCharacterSeverity(
+  char: string,
+  config: ExtensionConfig,
+): vscode.DiagnosticSeverity {
   const override = config.severityOverrides.get(char);
   if (override !== undefined) return override;
 
   const codePoint = char.codePointAt(0)!;
-  if (ERROR_LEVEL_CODEPOINTS.has(codePoint)) return vscode.DiagnosticSeverity.Error;
+  if (ERROR_LEVEL_CODEPOINTS.has(codePoint))
+    return vscode.DiagnosticSeverity.Error;
 
   return vscode.DiagnosticSeverity.Information;
 }
@@ -144,7 +157,10 @@ function readConfig(): ExtensionConfig {
   }
 
   const rawDecoration = cfg.get<Record<string, string>>("decoration", {});
-  const decoration: Record<string, string> = { ...DEFAULT_DECORATION, ...rawDecoration };
+  const decoration: Record<string, string> = {
+    ...DEFAULT_DECORATION,
+    ...rawDecoration,
+  };
 
   const rawReplacements = cfg.get<Record<string, string>>("replacementMap", {});
 

@@ -15,7 +15,11 @@ export function log(message: string): void {
 
 export function logError(context: string, error?: unknown): void {
   const msg =
-    error instanceof Error ? error.message : error !== undefined ? String(error) : "unknown error";
+    error instanceof Error
+      ? error.message
+      : error !== undefined
+        ? String(error)
+        : "unknown error";
   log(`ERROR [${context}] ${msg}`);
 }
 

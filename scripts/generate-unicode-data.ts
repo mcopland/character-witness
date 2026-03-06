@@ -36,7 +36,7 @@ const HANGUL_RANGE = { start: 0xac00, end: 0xd7a3 };
 
 function isInAlgorithmicRange(cp: number): boolean {
   if (cp >= HANGUL_RANGE.start && cp <= HANGUL_RANGE.end) return true;
-  return ALGORITHMIC_RANGES.some((r) => cp >= r.start && cp <= r.end);
+  return ALGORITHMIC_RANGES.some(r => cp >= r.start && cp <= r.end);
 }
 
 const nameLines: string[] = [];
@@ -45,9 +45,9 @@ for (const [cp, name] of namesMap) {
   if (cp <= 0x7f) continue;
   if (isInAlgorithmicRange(cp)) continue;
   if (name.startsWith("<")) continue;
-  if (cp >= 0xd800 && cp <= 0xdfff) continue;   // Surrogates (not valid scalar values)
-  if (cp >= 0xe000 && cp <= 0xf8ff) continue;    // BMP Private Use Area
-  if (cp >= 0xf0000 && cp <= 0xffffd) continue;  // Plane 15 Private Use
+  if (cp >= 0xd800 && cp <= 0xdfff) continue; // Surrogates (not valid scalar values)
+  if (cp >= 0xe000 && cp <= 0xf8ff) continue; // BMP Private Use Area
+  if (cp >= 0xf0000 && cp <= 0xffffd) continue; // Plane 15 Private Use
   if (cp >= 0x100000 && cp <= 0x10fffd) continue; // Plane 16 Private Use
 
   const hex = cp.toString(16).toUpperCase().padStart(4, "0");
@@ -70,4 +70,6 @@ const txtStats = fs.statSync(txtPath);
 console.log("Generated " + txtPath);
 console.log("  Unicode version   : " + UNICODE_VERSION);
 console.log("  Named characters  : " + nameLines.length.toLocaleString());
-console.log("  File size         : " + (txtStats.size / 1024).toFixed(0) + " KB");
+console.log(
+  "  File size         : " + (txtStats.size / 1024).toFixed(0) + " KB",
+);

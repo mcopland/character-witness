@@ -1,7 +1,7 @@
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
 
 export async function run(): Promise<void> {
-  const { tests } = await import('./extension.test');
+  const { tests } = await import("./extension.test");
   let failed = 0;
   for (const { name, fn } of tests) {
     try {
@@ -11,15 +11,15 @@ export async function run(): Promise<void> {
       console.error(`FAIL  ${name}`, e);
       failed++;
     } finally {
-      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
     }
   }
   const passed = tests.length - failed;
   const summary = `Extension Tests: ${passed} passed, ${failed} failed.`;
   if (failed > 0) {
-    await vscode.window.showErrorMessage(summary, 'Close');
+    await vscode.window.showErrorMessage(summary, "Close");
     throw new Error(`${failed} test(s) failed.`);
   } else {
-    await vscode.window.showInformationMessage(summary, 'Close');
+    await vscode.window.showInformationMessage(summary, "Close");
   }
 }

@@ -7,14 +7,17 @@ vi.mock("vscode", () => ({}));
 // Run with:  npx vitest run
 // ---------------------------------------------------------------------------
 
-import { parseCharacterEntry, parseCharacterEntries, titleCase, formatCodePoint, toHex } from "../utils";
-import {
-  getCharacterName,
-  UNICODE_VERSION,
-} from "../generated/unicode-names";
-import { formatGroupedDiagnosticMessage, NonAsciiMatch } from "../scanner";
 import { compileIgnoredPaths } from "../config";
 import { isIgnoredDocument } from "../extension";
+import { getCharacterName, UNICODE_VERSION } from "../generated/unicode-names";
+import { formatGroupedDiagnosticMessage, NonAsciiMatch } from "../scanner";
+import {
+  formatCodePoint,
+  parseCharacterEntries,
+  parseCharacterEntry,
+  titleCase,
+  toHex,
+} from "../utils";
 
 describe("parseCharacterEntry", () => {
   test("u+HHHH notation", () => {
@@ -33,11 +36,16 @@ describe("parseCharacterEntry", () => {
     assert.strictEqual(parseCharacterEntry("A"), undefined);
   });
 
-  test("accepts \\uHHHH format", () => assert.strictEqual(parseCharacterEntry("\\u00a3"), "\u00a3"));
-  test("accepts \\u{HHHH} format", () => assert.strictEqual(parseCharacterEntry("\\u{00a3}"), "\u00a3"));
-  test("accepts 0xHHHH format", () => assert.strictEqual(parseCharacterEntry("0x00a3"), "\u00a3"));
-  test("accepts 0XHHHH format", () => assert.strictEqual(parseCharacterEntry("0X00a3"), "\u00a3"));
-  test("\\uHHHH requires exactly 4 digits", () => assert.strictEqual(parseCharacterEntry("\\u219"), undefined));
+  test("accepts \\uHHHH format", () =>
+    assert.strictEqual(parseCharacterEntry("\\u00a3"), "\u00a3"));
+  test("accepts \\u{HHHH} format", () =>
+    assert.strictEqual(parseCharacterEntry("\\u{00a3}"), "\u00a3"));
+  test("accepts 0xHHHH format", () =>
+    assert.strictEqual(parseCharacterEntry("0x00a3"), "\u00a3"));
+  test("accepts 0XHHHH format", () =>
+    assert.strictEqual(parseCharacterEntry("0X00a3"), "\u00a3"));
+  test("\\uHHHH requires exactly 4 digits", () =>
+    assert.strictEqual(parseCharacterEntry("\\u219"), undefined));
 
   test("unrecognized input returns undefined", () => {
     assert.strictEqual(parseCharacterEntry("hello"), undefined);
@@ -60,7 +68,9 @@ describe("parseCharacterEntries", () => {
   });
 
   test("single-element range (start equals end)", () => {
-    assert.deepStrictEqual(parseCharacterEntries("u+2500 - u+2500"), ["\u2500"]);
+    assert.deepStrictEqual(parseCharacterEntries("u+2500 - u+2500"), [
+      "\u2500",
+    ]);
   });
 
   test("inverted range (start > end) returns empty array", () => {
@@ -72,9 +82,12 @@ describe("parseCharacterEntries", () => {
     assert.deepStrictEqual(parseCharacterEntries(""), []);
   });
 
-  test("range with \\u format", () => assert.strictEqual(parseCharacterEntries("\\u2018 - \\u2020").length, 9));
-  test("range with 0x format", () => assert.strictEqual(parseCharacterEntries("0x2018 - 0x2020").length, 9));
-  test("range with mixed formats", () => assert.strictEqual(parseCharacterEntries("u+2018 - 0x2020").length, 9));
+  test("range with \\u format", () =>
+    assert.strictEqual(parseCharacterEntries("\\u2018 - \\u2020").length, 9));
+  test("range with 0x format", () =>
+    assert.strictEqual(parseCharacterEntries("0x2018 - 0x2020").length, 9));
+  test("range with mixed formats", () =>
+    assert.strictEqual(parseCharacterEntries("u+2018 - 0x2020").length, 9));
 });
 
 describe("titleCase", () => {
@@ -82,7 +95,7 @@ describe("titleCase", () => {
     assert.strictEqual(titleCase("EM DASH"), "Em Dash");
     assert.strictEqual(
       titleCase("LEFT SINGLE QUOTATION MARK"),
-      "Left Single Quotation Mark"
+      "Left Single Quotation Mark",
     );
     assert.strictEqual(titleCase("COPYRIGHT SIGN"), "Copyright Sign");
   });
@@ -99,20 +112,34 @@ describe("toHex", () => {
   });
 
   test("returns lowercase hex", () => {
-    assert.strictEqual(toHex(0xFFFd), "fffd");
-    assert.strictEqual(toHex(0xFF21), "ff21");
+    assert.strictEqual(toHex(0xfffd), "fffd");
+    assert.strictEqual(toHex(0xff21), "ff21");
   });
 });
 
 describe("formatCodePoint", () => {
-  test("u+ format lower case", () => assert.strictEqual(formatCodePoint("00e9", "u+", "lower"), "u+00e9"));
-  test("u+ format upper case", () => assert.strictEqual(formatCodePoint("00e9", "u+", "upper"), "U+00E9"));
-  test("\\u format lower case", () => assert.strictEqual(formatCodePoint("00e9", "\\u", "lower"), "\\u00e9"));
-  test("\\u format upper case", () => assert.strictEqual(formatCodePoint("00e9", "\\u", "upper"), "\\u00E9"));
-  test("\\u{} format lower case", () => assert.strictEqual(formatCodePoint("1f600", "\\u{}", "lower"), "\\u{1f600}"));
-  test("\\u{} format upper case", () => assert.strictEqual(formatCodePoint("1f600", "\\u{}", "upper"), "\\u{1F600}"));
-  test("0x format lower case", () => assert.strictEqual(formatCodePoint("00e9", "0x", "lower"), "0x00e9"));
-  test("0x format upper case", () => assert.strictEqual(formatCodePoint("00e9", "0x", "upper"), "0x00E9"));
+  test("u+ format lower case", () =>
+    assert.strictEqual(formatCodePoint("00e9", "u+", "lower"), "u+00e9"));
+  test("u+ format upper case", () =>
+    assert.strictEqual(formatCodePoint("00e9", "u+", "upper"), "U+00E9"));
+  test("\\u format lower case", () =>
+    assert.strictEqual(formatCodePoint("00e9", "\\u", "lower"), "\\u00e9"));
+  test("\\u format upper case", () =>
+    assert.strictEqual(formatCodePoint("00e9", "\\u", "upper"), "\\u00E9"));
+  test("\\u{} format lower case", () =>
+    assert.strictEqual(
+      formatCodePoint("1f600", "\\u{}", "lower"),
+      "\\u{1f600}",
+    ));
+  test("\\u{} format upper case", () =>
+    assert.strictEqual(
+      formatCodePoint("1f600", "\\u{}", "upper"),
+      "\\u{1F600}",
+    ));
+  test("0x format lower case", () =>
+    assert.strictEqual(formatCodePoint("00e9", "0x", "lower"), "0x00e9"));
+  test("0x format upper case", () =>
+    assert.strictEqual(formatCodePoint("00e9", "0x", "upper"), "0x00E9"));
   test("supplementary code point (5 hex digits)", () => {
     assert.strictEqual(formatCodePoint("1f600", "u+", "upper"), "U+1F600");
     assert.strictEqual(formatCodePoint("1f600", "u+", "lower"), "u+1f600");
@@ -130,18 +157,15 @@ describe("Unicode name lookups", () => {
     assert.strictEqual(getCharacterName(0x00a9), "COPYRIGHT SIGN");
     assert.strictEqual(getCharacterName(0x00f7), "DIVISION SIGN");
     assert.strictEqual(getCharacterName(0x00a3), "POUND SIGN");
-    assert.strictEqual(getCharacterName(0x00e9), "LATIN SMALL LETTER E WITH ACUTE");
+    assert.strictEqual(
+      getCharacterName(0x00e9),
+      "LATIN SMALL LETTER E WITH ACUTE",
+    );
   });
 
   test("CJK unified ideographs (algorithmic)", () => {
-    assert.strictEqual(
-      getCharacterName(0x4e00),
-      "CJK UNIFIED IDEOGRAPH-4E00"
-    );
-    assert.strictEqual(
-      getCharacterName(0x9fff),
-      "CJK UNIFIED IDEOGRAPH-9FFF"
-    );
+    assert.strictEqual(getCharacterName(0x4e00), "CJK UNIFIED IDEOGRAPH-4E00");
+    assert.strictEqual(getCharacterName(0x9fff), "CJK UNIFIED IDEOGRAPH-9FFF");
   });
 
   test("Hangul syllables (algorithmic)", () => {
@@ -156,10 +180,7 @@ describe("Unicode name lookups", () => {
 
   test("correction aliases override original name", () => {
     // U+01A2 was corrected from LATIN CAPITAL LETTER OI to LATIN CAPITAL LETTER GHA
-    assert.strictEqual(
-      getCharacterName(0x01a2),
-      "LATIN CAPITAL LETTER GHA"
-    );
+    assert.strictEqual(getCharacterName(0x01a2), "LATIN CAPITAL LETTER GHA");
   });
 
   test("ASCII code points return undefined", () => {
@@ -177,14 +198,14 @@ describe("formatGroupedDiagnosticMessage", () => {
     const m = { ...makeMatch("·"), unicodeName: "MIDDLE DOT" };
     assert.strictEqual(
       formatGroupedDiagnosticMessage([m]),
-      "Middle Dot '·' U+00B7"
+      "Middle Dot '·' U+00B7",
     );
   });
 
   test("two matches produces compact array format", () => {
     assert.strictEqual(
       formatGroupedDiagnosticMessage([makeMatch("·"), makeMatch("—")]),
-      "2 non-ASCII characters: ['·', '—']"
+      "2 non-ASCII characters: ['·', '—']",
     );
   });
 
@@ -192,13 +213,17 @@ describe("formatGroupedDiagnosticMessage", () => {
     const matches = ["·", "·", "©", "®", "™", "°"].map(makeMatch);
     assert.ok(
       formatGroupedDiagnosticMessage(matches).startsWith(
-        "6 non-ASCII characters: "
-      )
+        "6 non-ASCII characters: ",
+      ),
     );
   });
 
   test("array contains each char in order", () => {
-    const result = formatGroupedDiagnosticMessage([makeMatch("·"), makeMatch("©"), makeMatch("®")]);
+    const result = formatGroupedDiagnosticMessage([
+      makeMatch("·"),
+      makeMatch("©"),
+      makeMatch("®"),
+    ]);
     assert.strictEqual(result, "3 non-ASCII characters: ['·', '©', '®']");
   });
 
@@ -206,7 +231,7 @@ describe("formatGroupedDiagnosticMessage", () => {
     const m = { ...makeMatch("·"), unicodeName: "MIDDLE DOT" };
     assert.strictEqual(
       formatGroupedDiagnosticMessage([m], "0x", "upper"),
-      "Middle Dot '·' 0x00B7"
+      "Middle Dot '·' 0x00B7",
     );
   });
 });
@@ -229,7 +254,7 @@ describe("compileIgnoredPaths", () => {
 });
 
 describe("isIgnoredDocument", () => {
-  function makeDoc(fsPath: string): any {
+  function makeDoc(fsPath: string) {
     return { uri: { fsPath } };
   }
 
@@ -238,14 +263,23 @@ describe("isIgnoredDocument", () => {
   });
 
   test("returns true when a pattern matches the normalized path", () => {
-    assert.strictEqual(isIgnoredDocument(makeDoc("/foo/bar.ts"), [/bar\.ts$/]), true);
+    assert.strictEqual(
+      isIgnoredDocument(makeDoc("/foo/bar.ts"), [/bar\.ts$/]),
+      true,
+    );
   });
 
   test("returns false when no pattern matches", () => {
-    assert.strictEqual(isIgnoredDocument(makeDoc("/foo/bar.ts"), [/baz\.ts$/]), false);
+    assert.strictEqual(
+      isIgnoredDocument(makeDoc("/foo/bar.ts"), [/baz\.ts$/]),
+      false,
+    );
   });
 
   test("normalizes backslashes to forward slashes before matching", () => {
-    assert.strictEqual(isIgnoredDocument(makeDoc("C:\\foo\\bar.ts"), [/foo\/bar\.ts$/]), true);
+    assert.strictEqual(
+      isIgnoredDocument(makeDoc("C:\\foo\\bar.ts"), [/foo\/bar\.ts$/]),
+      true,
+    );
   });
 });

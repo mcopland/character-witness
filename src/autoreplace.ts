@@ -1,11 +1,14 @@
 import * as vscode from "vscode";
 import { getConfig } from "./config";
-import { NonAsciiMatch } from "./scanner";
 import { handleError } from "./logger";
+import { NonAsciiMatch } from "./scanner";
 
 export function buildReplacementEdits(
   document: vscode.TextDocument,
-  getCachedMatchesFn: (doc: vscode.TextDocument, allowed: Set<string>) => NonAsciiMatch[]
+  getCachedMatchesFn: (
+    doc: vscode.TextDocument,
+    allowed: Set<string>,
+  ) => NonAsciiMatch[],
 ): vscode.TextEdit[] {
   try {
     const config = getConfig();

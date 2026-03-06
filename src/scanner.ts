@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { getCharacterName } from "./generated/unicode-names";
-import { titleCase, formatCodePoint, toHex } from "./utils";
 import { getTextRegions, TextRegion } from "./regions";
+import { formatCodePoint, titleCase, toHex } from "./utils";
 
 // ---------------------------------------------------------------------------
 // Codepoints that default to Error-level severity
@@ -161,7 +161,7 @@ export interface NonAsciiMatch {
 function formatDiagnosticMessage(
   match: NonAsciiMatch,
   format: string = "u+",
-  caseType: string = "upper"
+  caseType: string = "upper",
 ): string {
   const code = formatCodePoint(match.hex, format, caseType);
   if (match.unicodeName) {
@@ -178,17 +178,18 @@ function formatDiagnosticMessage(
 export function formatGroupedDiagnosticMessage(
   matches: NonAsciiMatch[],
   format: string = "u+",
-  caseType: string = "upper"
+  caseType: string = "upper",
 ): string {
-  if (matches.length === 1) return formatDiagnosticMessage(matches[0], format, caseType);
-  const parts = matches.map((m) => `'${m.char}'`);
+  if (matches.length === 1)
+    return formatDiagnosticMessage(matches[0], format, caseType);
+  const parts = matches.map(m => `'${m.char}'`);
   return `${matches.length} non-ASCII characters: [${parts.join(", ")}]`;
 }
 
 export function formatHoverMarkdown(
   match: NonAsciiMatch,
   format: string = "u+",
-  caseType: string = "upper"
+  caseType: string = "upper",
 ): vscode.MarkdownString {
   const code = formatCodePoint(match.hex, format, caseType);
   const parts: string[] = [];
@@ -204,7 +205,7 @@ export function findNonAsciiCharacters(
   allowedCharacters: Set<string>,
   includeStrings: boolean = true,
   includeComments: boolean = true,
-  languageId: string = "plaintext"
+  languageId: string = "plaintext",
 ): NonAsciiMatch[] {
   const matches: NonAsciiMatch[] = [];
   const text = document.getText();
@@ -253,7 +254,10 @@ export function findNonAsciiCharacters(
   return matches;
 }
 
-function getRegionTypeAtOffset(regions: TextRegion[], offset: number): "string" | "comment" | undefined {
+function getRegionTypeAtOffset(
+  regions: TextRegion[],
+  offset: number,
+): "string" | "comment" | undefined {
   let lo = 0;
   let hi = regions.length - 1;
   while (lo <= hi) {

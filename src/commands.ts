@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
 import { getConfig } from "./config";
-import { parseCharacterEntry, toHex } from "./utils";
 import { handleError } from "./logger";
+import { parseCharacterEntry, toHex } from "./utils";
 
 export async function addToAllowedCharacters(
-  onComplete?: (editor: vscode.TextEditor) => void
+  onComplete?: (editor: vscode.TextEditor) => void,
 ): Promise<void> {
   try {
     const editor = vscode.window.activeTextEditor;
@@ -34,10 +34,10 @@ export async function addToAllowedCharacters(
         const wideRange = new vscode.Range(pos, pos.translate(0, 2));
         const twoUnits = document.getText(wideRange);
         const firstCode = twoUnits.charCodeAt(0);
-        const isSurrogatePair = firstCode >= 0xD800 && firstCode <= 0xDBFF;
+        const isSurrogatePair = firstCode >= 0xd800 && firstCode <= 0xdbff;
         const charRange = new vscode.Range(
           pos,
-          pos.translate(0, isSurrogatePair ? 2 : 1)
+          pos.translate(0, isSurrogatePair ? 2 : 1),
         );
         const char = document.getText(charRange);
         if (char.length > 0) {
@@ -51,7 +51,7 @@ export async function addToAllowedCharacters(
 
     if (charsToAdd.size === 0) {
       vscode.window.showInformationMessage(
-        "Character Witness: No non-ASCII characters found at cursor or selection."
+        "Character Witness: No non-ASCII characters found at cursor or selection.",
       );
       return;
     }
@@ -77,15 +77,15 @@ export async function addToAllowedCharacters(
     await cfg.update(
       "allowedCharacters",
       newEntries,
-      vscode.ConfigurationTarget.Global
+      vscode.ConfigurationTarget.Global,
     );
 
-    const added = Array.from(charsToAdd).map((ch) => {
+    const added = Array.from(charsToAdd).map(ch => {
       const cp = ch.codePointAt(0)!;
       return "u+" + toHex(cp);
     });
     vscode.window.showInformationMessage(
-      `Character Witness: Added ${added.join(", ")} to allowed list.`
+      `Character Witness: Added ${added.join(", ")} to allowed list.`,
     );
 
     // Refresh the active editor immediately via callback
