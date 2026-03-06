@@ -6,8 +6,8 @@ import { formatCodePoint, titleCase, toHex } from "./utils";
 // ---------------------------------------------------------------------------
 // Codepoints that default to Error-level severity
 // (invisible/control chars and confusable fullwidth forms)
-// Note: surrogate code units (0xD800–0xDBFF, 0xDC00–0xDFFF) are handled
-// transparently by the string iterator below — they never appear as lone values.
+// Note: surrogate code units (0xD800-0xDBFF, 0xDC00-0xDFFF) are handled
+// transparently by the string iterator below. They never appear as lone values.
 // ---------------------------------------------------------------------------
 
 export const ERROR_LEVEL_CODEPOINTS: Set<number> = new Set([

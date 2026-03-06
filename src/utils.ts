@@ -60,7 +60,7 @@ export function parseCharacterEntries(entry: string): string[] {
 
 /**
  * Return a title-cased version of a Unicode name.
- * "EM DASH" → "Em Dash"
+ * "EM DASH" -> "Em Dash"
  */
 export function titleCase(name: string): string {
   return name.toLowerCase().replace(/(?:^|\s)\S/g, ch => ch.toUpperCase());
