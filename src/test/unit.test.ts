@@ -182,7 +182,7 @@ describe("Unicode name lookups", () => {
     assert.strictEqual(getCharacterName(0x9fff), "CJK UNIFIED IDEOGRAPH-9FFF");
   });
 
-  test("Hangul syllables (algorithmic)", () => {
+  test("Hangul syllables", () => {
     assert.strictEqual(getCharacterName(0xac00), "HANGUL SYLLABLE GA");
     assert.strictEqual(getCharacterName(0xd7a3), "HANGUL SYLLABLE HIH");
   });
