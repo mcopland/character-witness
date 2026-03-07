@@ -74,12 +74,13 @@ Fully customizable visual style for highlighted characters. Color properties (`b
 
 **Type:** `string[]` | **Default:** `[]`
 
-Characters to exclude from detection. Use `u+hhhh` notation (case-insensitive, 4-6 hex digits).
+Characters to exclude from detection. Each entry uses `u+hhhh` notation (4-6 hex digits). Also accepted: `\uHHHH`, `\u{HHHH}`, and `0xHHHH`. Ranges are supported with `u+HHHH - u+HHHH` syntax. All notations are case-insensitive.
 
 ```jsonc
 "characterWitness.allowedCharacters": [
   "u+00a3",
-  "u+00a9"
+  "u+00a9",
+  "u+2500 - u+257f"
 ]
 ```
 
@@ -129,6 +130,50 @@ Whether to flag non-ASCII characters inside string literals. When `false`, chara
 **Type:** `boolean` | **Default:** `true`
 
 Whether to flag non-ASCII characters inside comments. When `false`, characters within comments are ignored.
+
+### `characterWitness.diagnosticSeverities`
+
+**Type:** `string[]` | **Default:** `["error", "warning", "info"]`
+
+Which severity levels are published to the Problems panel. Remove a level to suppress those diagnostics while keeping decorations. Set to `[]` to disable all diagnostics entirely.
+
+### `characterWitness.codePointFormat`
+
+**Type:** `enum` | **Default:** `"u+"`
+
+Controls how code points are displayed in hover text, diagnostics, and notifications. Also controls the format written to settings when using **Add to Allowed Characters**.
+
+| Value   | Example       | Description                            |
+| ------- | ------------- | -------------------------------------- |
+| `u+`    | `u+2019`      | Unicode U+ notation (default)          |
+| `\u`    | `\u2019`      | JavaScript escape notation (4 digits)  |
+| `\u{}`  | `\u{2019}`    | JavaScript ES6 brace notation          |
+| `0x`    | `0x2019`      | C-style hex notation                   |
+
+### `characterWitness.codePointCase`
+
+**Type:** `enum` | **Default:** `"upper"`
+
+Whether hex digits (and the `u+` prefix) are displayed in lower or uppercase.
+
+| Value   | Example   |
+| ------- | --------- |
+| `upper` | `U+25AB`  |
+| `lower` | `u+25ab`  |
+
+### `characterWitness.ignoredPaths`
+
+**Type:** `string[]` | **Default:** `[]`
+
+Glob patterns matched against each file's full path (forward slashes, cross-platform). Files with a matching path are excluded from scanning, decorations, diagnostics, and auto-replace.
+
+```jsonc
+"characterWitness.ignoredPaths": [
+  "**/node_modules/**",
+  "**/*.min.js",
+  "{dist,build}/**"
+]
+```
 
 ## Commands
 
@@ -246,13 +291,14 @@ src/
   extension.ts          Activation, event wiring, scan cache, debounced updates
   config.ts             Configuration parsing, decoration render options, defaults
   scanner.ts            Document scanning, surrogate pair handling, diagnostic formatting
+  regions.ts            Regex-based string/comment region detection (~15 language families)
   decoration.ts         Decoration type lifecycle (create, fingerprint, dispose)
   autoreplace.ts        Auto-replace on save: builds TextEdit[] from cached matches
   commands.ts           Command implementations (Add to Allowed Characters)
   logger.ts             OutputChannel wrapper with timestamped logging
   utils.ts              Pure utilities: u+hhhh parsing, title-casing, formatting
   generated/
-    unicode-names.ts    Unicode name lookup: algorithmic ranges, Hangul tables, name aliases
+    unicode-names.ts    Unicode name lookup: algorithmic ranges, name aliases, data file
   test/
     unit.test.ts        Unit tests for pure functions (no VS Code API required)
     extension.test.ts   Integration tests (run in Extension Development Host)
@@ -268,9 +314,8 @@ When looking up a character name, the generated module checks (in order):
 
 1. **Correction aliases** (fixes for officially corrected Unicode names)
 2. **Control aliases** (descriptive names for control characters like U+0085 NEXT LINE)
-3. **Hangul decomposition** (algorithmic syllable names for U+AC00-U+D7A3)
-4. **Algorithmic ranges** (prefix + hex for CJK, Tangut, Khitan, Nushu)
-5. **Packed name table** (all remaining individually named characters)
+3. **Algorithmic ranges** (prefix + hex for CJK, Tangut, Khitan, Nushu)
+4. **Packed name table** (all remaining individually named characters, including Hangul syllables)
 
 ## License
 
