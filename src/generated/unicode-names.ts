@@ -29,97 +29,6 @@ const ALGORITHMIC_RANGES: readonly AlgorithmicRange[] = [
   { start: 0x1b170, end: 0x1b2fb, prefix: "NUSHU CHARACTER-" },
 ];
 
-// Hangul syllable decomposition tables (U+AC00..U+D7A3)
-const HANGUL_BASE = 0xac00;
-const HANGUL_V_COUNT = 21;
-const HANGUL_T_COUNT = 28;
-
-const HANGUL_L = [
-  "G",
-  "GG",
-  "N",
-  "D",
-  "DD",
-  "R",
-  "M",
-  "B",
-  "BB",
-  "S",
-  "SS",
-  "",
-  "J",
-  "JJ",
-  "C",
-  "K",
-  "T",
-  "P",
-  "H",
-] as const;
-
-const HANGUL_V = [
-  "A",
-  "AE",
-  "YA",
-  "YAE",
-  "EO",
-  "E",
-  "YEO",
-  "YE",
-  "O",
-  "WA",
-  "WAE",
-  "OE",
-  "YO",
-  "U",
-  "WEO",
-  "WE",
-  "WI",
-  "YU",
-  "EU",
-  "YI",
-  "I",
-] as const;
-
-const HANGUL_T = [
-  "",
-  "G",
-  "GG",
-  "GS",
-  "N",
-  "NJ",
-  "NH",
-  "D",
-  "L",
-  "LG",
-  "LM",
-  "LB",
-  "LS",
-  "LT",
-  "LP",
-  "LH",
-  "M",
-  "B",
-  "BS",
-  "S",
-  "SS",
-  "NG",
-  "J",
-  "C",
-  "K",
-  "T",
-  "P",
-  "H",
-] as const;
-
-function hangulName(cp: number): string {
-  const index = cp - HANGUL_BASE;
-  const l = Math.floor(index / (HANGUL_V_COUNT * HANGUL_T_COUNT));
-  const v = Math.floor(
-    (index % (HANGUL_V_COUNT * HANGUL_T_COUNT)) / HANGUL_T_COUNT,
-  );
-  const t = index % HANGUL_T_COUNT;
-  return `HANGUL SYLLABLE ${HANGUL_L[l]}${HANGUL_V[v]}${HANGUL_T[t]}`;
-}
 
 /** Lookup map populated on first call. */
 let _nameMap: Map<number, string> | undefined;
@@ -225,9 +134,8 @@ const CONTROL_NAMES: Readonly<Record<number, string>> = {
  * Resolution order:
  *  1. Correction alias (NameAliases.txt type=correction)
  *  2. Control alias    (NameAliases.txt type=control)
- *  3. Hangul syllable  (algorithmic decomposition)
- *  4. Algorithmic range (CJK / Tangut / Khitan / Nushu)
- *  5. Individual name  (data file)
+ *  3. Algorithmic range (CJK / Tangut / Khitan / Nushu)
+ *  4. Individual name  (data file)
  */
 export function getCharacterName(codePoint: number): string | undefined {
   if (codePoint <= 0x7f) return undefined;
@@ -240,18 +148,13 @@ export function getCharacterName(codePoint: number): string | undefined {
   const control = CONTROL_NAMES[codePoint];
   if (control) return control;
 
-  // 3. Hangul syllable
-  if (codePoint >= HANGUL_BASE && codePoint <= 0xd7a3) {
-    return hangulName(codePoint);
-  }
-
-  // 4. Algorithmic range
+  // 3. Algorithmic range
   for (const range of ALGORITHMIC_RANGES) {
     if (codePoint >= range.start && codePoint <= range.end) {
       return `${range.prefix}${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
     }
   }
 
-  // 5. Individual name
+  // 4. Individual name
   return getNameMap().get(codePoint);
 }
