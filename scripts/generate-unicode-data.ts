@@ -31,17 +31,31 @@ const ALGORITHMIC_RANGES: AlgorithmicRange[] = [
   { start: 0x1b170, end: 0x1b2fb, prefix: "NUSHU CHARACTER-" },
 ];
 
-const HANGUL_RANGE = { start: 0xac00, end: 0xd7a3 };
-
 function isInAlgorithmicRange(cp: number): boolean {
-  if (cp >= HANGUL_RANGE.start && cp <= HANGUL_RANGE.end) return true;
   return ALGORITHMIC_RANGES.some(r => cp >= r.start && cp <= r.end);
+}
+
+const HANGUL_BASE = 0xac00;
+const HANGUL_END = 0xd7a3;
+const HANGUL_V_COUNT = 21;
+const HANGUL_T_COUNT = 28;
+const HANGUL_L = ["G","GG","N","D","DD","R","M","B","BB","S","SS","","J","JJ","C","K","T","P","H"];
+const HANGUL_V = ["A","AE","YA","YAE","EO","E","YEO","YE","O","WA","WAE","OE","YO","U","WEO","WE","WI","YU","EU","YI","I"];
+const HANGUL_T = ["","G","GG","GS","N","NJ","NH","D","L","LG","LM","LB","LS","LT","LP","LH","M","B","BS","S","SS","NG","J","C","K","T","P","H"];
+
+function hangulName(cp: number): string {
+  const index = cp - HANGUL_BASE;
+  const l = Math.floor(index / (HANGUL_V_COUNT * HANGUL_T_COUNT));
+  const v = Math.floor((index % (HANGUL_V_COUNT * HANGUL_T_COUNT)) / HANGUL_T_COUNT);
+  const t = index % HANGUL_T_COUNT;
+  return "HANGUL SYLLABLE " + HANGUL_L[l] + HANGUL_V[v] + HANGUL_T[t];
 }
 
 const nameLines: string[] = [];
 
 for (const [cp, name] of namesMap) {
   if (cp <= 0x7f) continue;
+  if (cp >= HANGUL_BASE && cp <= HANGUL_END) continue; // handled separately below
   if (isInAlgorithmicRange(cp)) continue;
   if (name.startsWith("<")) continue;
   if (cp >= 0xd800 && cp <= 0xdfff) continue; // Surrogates (not valid scalar values)
@@ -51,6 +65,11 @@ for (const [cp, name] of namesMap) {
 
   const hex = cp.toString(16).toUpperCase().padStart(4, "0");
   nameLines.push(hex + " " + name);
+}
+
+for (let cp = HANGUL_BASE; cp <= HANGUL_END; cp++) {
+  const hex = cp.toString(16).toUpperCase().padStart(4, "0");
+  nameLines.push(hex + " " + hangulName(cp));
 }
 
 nameLines.sort((a, b) => {
