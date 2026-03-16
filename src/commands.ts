@@ -1,7 +1,45 @@
 import * as vscode from "vscode";
+import { buildReplacementsOnDemand } from "./autoreplace";
 import { getConfig } from "./config";
 import { handleError } from "./logger";
+import { NonAsciiMatch } from "./scanner";
 import { parseCharacterEntry, toHex } from "./utils";
+
+export async function applyReplacementsNow(
+  getCachedMatchesFn: (
+    doc: vscode.TextDocument,
+    allowed: Set<string>,
+  ) => NonAsciiMatch[],
+  onComplete?: (editor: vscode.TextEditor) => void,
+): Promise<void> {
+  try {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+
+    const config = getConfig();
+    if (!config.enable) return;
+
+    const edits = buildReplacementsOnDemand(editor.document, getCachedMatchesFn);
+    if (edits.length === 0) {
+      vscode.window.showInformationMessage(
+        "Character Witness: No replacements to apply.",
+      );
+      return;
+    }
+
+    await editor.edit(editBuilder => {
+      for (const edit of edits) {
+        editBuilder.replace(edit.range, edit.newText);
+      }
+    });
+
+    if (onComplete) {
+      onComplete(editor);
+    }
+  } catch (err) {
+    handleError("applyReplacementsNow", err);
+  }
+}
 
 export async function addToAllowedCharacters(
   onComplete?: (editor: vscode.TextEditor) => void,

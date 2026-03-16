@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { buildReplacementEdits } from "./autoreplace";
-import { addToAllowedCharacters } from "./commands";
+import { addToAllowedCharacters, applyReplacementsNow } from "./commands";
 import {
   getCharacterSeverity,
   getConfig,
@@ -172,6 +172,13 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       "characterWitness.addToAllowedCharacters",
       () => addToAllowedCharacters(editor => updateEditor(editor)),
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "characterWitness.applyReplacements",
+      () => applyReplacementsNow(getCachedMatches, editor => updateEditor(editor)),
     ),
   );
 

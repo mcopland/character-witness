@@ -29,7 +29,6 @@ const ALGORITHMIC_RANGES: readonly AlgorithmicRange[] = [
   { start: 0x1b170, end: 0x1b2fb, prefix: "NUSHU CHARACTER-" },
 ];
 
-
 /** Lookup map populated on first call. */
 let _nameMap: Map<number, string> | undefined;
 

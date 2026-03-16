@@ -2,7 +2,7 @@
   "name": "character-witness",
   "displayName": "Character Witness",
   "description": "Detect, highlight, diagnose, and optionally auto-replace non-ASCII characters in your files.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "publisher": "character-witness",
   "license": "MIT",
   "repository": {
@@ -25,6 +25,10 @@
       {
         "command": "characterWitness.addToAllowedCharacters",
         "title": "Character Witness: Add to Allowed Characters"
+      },
+      {
+        "command": "characterWitness.applyReplacements",
+        "title": "Character Witness: Apply Replacements"
       }
     ],
     "menus": {
@@ -32,6 +36,11 @@
         {
           "command": "characterWitness.addToAllowedCharacters",
           "group": "1_modification@100",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "characterWitness.applyReplacements",
+          "group": "1_modification@101",
           "when": "editorTextFocus"
         }
       ]
