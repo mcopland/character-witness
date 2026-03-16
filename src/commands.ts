@@ -19,7 +19,10 @@ export async function applyReplacementsNow(
     const config = getConfig();
     if (!config.enable) return;
 
-    const edits = buildReplacementsOnDemand(editor.document, getCachedMatchesFn);
+    const edits = buildReplacementsOnDemand(
+      editor.document,
+      getCachedMatchesFn,
+    );
     if (edits.length === 0) {
       vscode.window.showInformationMessage(
         "Character Witness: No replacements to apply.",

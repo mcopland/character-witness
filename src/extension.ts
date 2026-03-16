@@ -176,9 +176,8 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "characterWitness.applyReplacements",
-      () => applyReplacementsNow(getCachedMatches, editor => updateEditor(editor)),
+    vscode.commands.registerCommand("characterWitness.applyReplacements", () =>
+      applyReplacementsNow(getCachedMatches, editor => updateEditor(editor)),
     ),
   );
 

@@ -39,14 +39,87 @@ const HANGUL_BASE = 0xac00;
 const HANGUL_END = 0xd7a3;
 const HANGUL_V_COUNT = 21;
 const HANGUL_T_COUNT = 28;
-const HANGUL_L = ["G","GG","N","D","DD","R","M","B","BB","S","SS","","J","JJ","C","K","T","P","H"];
-const HANGUL_V = ["A","AE","YA","YAE","EO","E","YEO","YE","O","WA","WAE","OE","YO","U","WEO","WE","WI","YU","EU","YI","I"];
-const HANGUL_T = ["","G","GG","GS","N","NJ","NH","D","L","LG","LM","LB","LS","LT","LP","LH","M","B","BS","S","SS","NG","J","C","K","T","P","H"];
+const HANGUL_L = [
+  "G",
+  "GG",
+  "N",
+  "D",
+  "DD",
+  "R",
+  "M",
+  "B",
+  "BB",
+  "S",
+  "SS",
+  "",
+  "J",
+  "JJ",
+  "C",
+  "K",
+  "T",
+  "P",
+  "H",
+];
+const HANGUL_V = [
+  "A",
+  "AE",
+  "YA",
+  "YAE",
+  "EO",
+  "E",
+  "YEO",
+  "YE",
+  "O",
+  "WA",
+  "WAE",
+  "OE",
+  "YO",
+  "U",
+  "WEO",
+  "WE",
+  "WI",
+  "YU",
+  "EU",
+  "YI",
+  "I",
+];
+const HANGUL_T = [
+  "",
+  "G",
+  "GG",
+  "GS",
+  "N",
+  "NJ",
+  "NH",
+  "D",
+  "L",
+  "LG",
+  "LM",
+  "LB",
+  "LS",
+  "LT",
+  "LP",
+  "LH",
+  "M",
+  "B",
+  "BS",
+  "S",
+  "SS",
+  "NG",
+  "J",
+  "C",
+  "K",
+  "T",
+  "P",
+  "H",
+];
 
 function hangulName(cp: number): string {
   const index = cp - HANGUL_BASE;
   const l = Math.floor(index / (HANGUL_V_COUNT * HANGUL_T_COUNT));
-  const v = Math.floor((index % (HANGUL_V_COUNT * HANGUL_T_COUNT)) / HANGUL_T_COUNT);
+  const v = Math.floor(
+    (index % (HANGUL_V_COUNT * HANGUL_T_COUNT)) / HANGUL_T_COUNT,
+  );
   const t = index % HANGUL_T_COUNT;
   return "HANGUL SYLLABLE " + HANGUL_L[l] + HANGUL_V[v] + HANGUL_T[t];
 }
