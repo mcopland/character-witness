@@ -5,6 +5,46 @@ import { handleError } from "./logger";
 import { NonAsciiMatch } from "./scanner";
 import { parseCharacterEntry, toHex } from "./utils";
 
+export async function goToNextNonAsciiCharacter(
+  getCachedMatchesFn: (
+    doc: vscode.TextDocument,
+    allowed: Set<string>,
+  ) => NonAsciiMatch[],
+): Promise<void> {
+  try {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+
+    const config = getConfig();
+    if (!config.enable) return;
+
+    const matches = getCachedMatchesFn(
+      editor.document,
+      config.allowedCharacters,
+    );
+    if (matches.length === 0) {
+      vscode.window.showInformationMessage(
+        "Character Witness: No non-ASCII characters found.",
+      );
+      return;
+    }
+
+    const cursor = editor.selection.active;
+    let next = matches.find(m => m.range.start.isAfter(cursor));
+    if (!next) {
+      next = matches[0];
+    }
+
+    editor.selection = new vscode.Selection(next.range.start, next.range.start);
+    editor.revealRange(
+      next.range,
+      vscode.TextEditorRevealType.InCenterIfOutsideViewport,
+    );
+  } catch (err) {
+    handleError("goToNextNonAsciiCharacter", err);
+  }
+}
+
 export async function applyReplacementsNow(
   getCachedMatchesFn: (
     doc: vscode.TextDocument,
