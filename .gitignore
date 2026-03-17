@@ -2,6 +2,7 @@
 .claude/
 .git*
 .vscode/*
+zshrc.md
 
 # Build
 *.vsix
