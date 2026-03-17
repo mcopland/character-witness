@@ -92,15 +92,7 @@ function updateEditor(editor: vscode.TextEditor): void {
     );
 
     const decType = ensureDecorationType();
-    const decorationOptions: vscode.DecorationOptions[] = matches.map(m => ({
-      range: m.range,
-      hoverMessage: formatHoverMarkdown(
-        m,
-        config.codePointFormat,
-        config.codePointCase,
-      ),
-    }));
-    editor.setDecorations(decType, decorationOptions);
+    editor.setDecorations(decType, matches.map(m => ({ range: m.range })));
 
     const lineGroups = new Map<number, NonAsciiMatch[]>();
     for (const m of matches) {
@@ -245,6 +237,26 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidCloseTextDocument(document => {
       diagnosticCollection.delete(document.uri);
       scanCache.delete(document.uri.toString());
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.languages.registerHoverProvider({ scheme: "*" }, {
+      provideHover(document, position) {
+        const config = getConfig();
+        const matches = getCachedMatches(
+          document,
+          config.allowedCharacters,
+          config.includeStrings,
+          config.includeComments,
+        );
+        const match = matches.find(m => m.range.contains(position));
+        if (!match) return undefined;
+        return new vscode.Hover(
+          formatHoverMarkdown(match, config.codePointFormat, config.codePointCase),
+          match.range,
+        );
+      },
     }),
   );
 
