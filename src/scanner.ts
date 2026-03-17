@@ -217,27 +217,54 @@ export function findNonAsciiCharacters(
 
   // Walk through every character using the string iterator (handles
   // surrogate pairs correctly so we get full code-points).
+  // Track line/charInLine manually to avoid O(n) document.positionAt calls.
   let offset = 0;
+  let line = 0;
+  let charInLine = 0;
+  let prevWasCR = false;
+
   for (const char of text) {
     const codePoint = char.codePointAt(0)!;
     const charLength = char.length; // 1 for BMP, 2 for supplementary
+
+    if (codePoint === 0x0d) {
+      // \r — start a new line; \r\n will skip the increment on \n
+      line++;
+      charInLine = 0;
+      prevWasCR = true;
+      offset += charLength;
+      continue;
+    }
+    if (codePoint === 0x0a) {
+      // \n — only bump line if not already counted by a preceding \r
+      if (!prevWasCR) {
+        line++;
+        charInLine = 0;
+      }
+      prevWasCR = false;
+      offset += charLength;
+      continue;
+    }
+    prevWasCR = false;
 
     if (codePoint > 127 && !allowedCharacters.has(char)) {
       if (regions) {
         const regionType = getRegionTypeAtOffset(regions, offset);
         if (regionType === "string" && !includeStrings) {
+          charInLine += charLength;
           offset += charLength;
           continue;
         }
         if (regionType === "comment" && !includeComments) {
+          charInLine += charLength;
           offset += charLength;
           continue;
         }
       }
 
-      const startPos = document.positionAt(offset);
-      const endPos = document.positionAt(offset + charLength);
       const hex = toHex(codePoint);
+      const startPos = new vscode.Position(line, charInLine);
+      const endPos = new vscode.Position(line, charInLine + charLength);
 
       matches.push({
         char,
@@ -248,6 +275,7 @@ export function findNonAsciiCharacters(
       });
     }
 
+    charInLine += charLength;
     offset += charLength;
   }
 
