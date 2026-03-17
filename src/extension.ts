@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
 import { buildReplacementEdits } from "./autoreplace";
-import { addToAllowedCharacters, applyReplacementsNow } from "./commands";
+import {
+  addToAllowedCharacters,
+  applyReplacementsNow,
+  goToNextNonAsciiCharacter,
+} from "./commands";
 import {
   getCharacterSeverity,
   getConfig,
@@ -34,11 +38,17 @@ interface ScanCacheEntry {
 const scanCache = new Map<string, ScanCacheEntry>();
 
 export function isIgnoredDocument(
-  document: { uri: { fsPath: string } },
+  document: { uri: vscode.Uri },
   ignoredPaths: RegExp[],
 ): boolean {
   const normalized = document.uri.fsPath.replace(/\\/g, "/");
-  return ignoredPaths.some(re => re.test(normalized));
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+  const testPath = workspaceFolder
+    ? normalized.slice(
+        workspaceFolder.uri.fsPath.replace(/\\/g, "/").length + 1,
+      )
+    : normalized;
+  return ignoredPaths.some(re => re.test(testPath));
 }
 
 function getCachedMatches(
@@ -170,6 +180,13 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("characterWitness.applyReplacements", () =>
       applyReplacementsNow(getCachedMatches, editor => updateEditor(editor)),
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "characterWitness.goToNextNonAsciiCharacter",
+      () => goToNextNonAsciiCharacter(getCachedMatches),
     ),
   );
 
