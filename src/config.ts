@@ -91,7 +91,7 @@ function globToRegExp(glob: string): RegExp {
       result += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
     }
   }
-  return new RegExp(result);
+  return new RegExp("^" + result);
 }
 
 export function compileIgnoredPaths(patterns: string[]): RegExp[] {

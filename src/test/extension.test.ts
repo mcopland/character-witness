@@ -510,7 +510,7 @@ test("Config | ignoredPaths matching file path should produce no diagnostics", a
       "Expected diagnostics before ignoredPaths configured",
     );
 
-    await withConfig({ ignoredPaths: ["*cw-test-ignored.txt"] }, async () => {
+    await withConfig({ ignoredPaths: ["**/cw-test-ignored.txt"] }, async () => {
       await waitForDiagnosticCount(uri, 0);
       const diags = vscode.languages.getDiagnostics(uri);
       assert.strictEqual(

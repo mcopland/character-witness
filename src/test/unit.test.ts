@@ -14,6 +14,9 @@ vi.mock("vscode", () => ({
       public character: number,
     ) {}
   },
+  workspace: {
+    getWorkspaceFolder: () => undefined,
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -278,7 +281,7 @@ describe("compileIgnoredPaths", () => {
 
 describe("isIgnoredDocument", () => {
   function makeDoc(fsPath: string) {
-    return { uri: { fsPath } };
+    return { uri: { fsPath } as unknown as vscode.Uri };
   }
 
   test("returns false when ignoredPaths is empty", () => {
