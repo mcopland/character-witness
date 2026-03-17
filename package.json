@@ -32,6 +32,10 @@
       {
         "command": "characterWitness.applyReplacements",
         "title": "Character Witness: Apply Replacements"
+      },
+      {
+        "command": "characterWitness.goToNextNonAsciiCharacter",
+        "title": "Character Witness: Go to Next Non-ASCII Character"
       }
     ],
     "menus": {
@@ -44,6 +48,11 @@
         {
           "command": "characterWitness.applyReplacements",
           "group": "1_modification@101",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "characterWitness.goToNextNonAsciiCharacter",
+          "group": "1_modification@102",
           "when": "editorTextFocus"
         }
       ]
