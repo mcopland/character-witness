@@ -143,12 +143,12 @@ Which severity levels are published to the Problems panel. Remove a level to sup
 
 Controls how code points are displayed in hover text, diagnostics, and notifications. Also controls the format written to settings when using **Add to Allowed Characters**.
 
-| Value   | Example       | Description                            |
-| ------- | ------------- | -------------------------------------- |
-| `u+`    | `u+2019`      | Unicode U+ notation (default)          |
-| `\u`    | `\u2019`      | JavaScript escape notation (4 digits)  |
-| `\u{}`  | `\u{2019}`    | JavaScript ES6 brace notation          |
-| `0x`    | `0x2019`      | C-style hex notation                   |
+| Value  | Example    | Description                           |
+| ------ | ---------- | ------------------------------------- |
+| `u+`   | `u+2019`   | Unicode U+ notation (default)         |
+| `\u`   | `\u2019`   | JavaScript escape notation (4 digits) |
+| `\u{}` | `\u{2019}` | JavaScript ES6 brace notation         |
+| `0x`   | `0x2019`   | C-style hex notation                  |
 
 ### `characterWitness.codePointCase`
 
@@ -156,10 +156,10 @@ Controls how code points are displayed in hover text, diagnostics, and notificat
 
 Whether hex digits (and the `u+` prefix) are displayed in lower or uppercase.
 
-| Value   | Example   |
-| ------- | --------- |
-| `upper` | `U+25AB`  |
-| `lower` | `u+25ab`  |
+| Value   | Example  |
+| ------- | -------- |
+| `upper` | `U+25AB` |
+| `lower` | `u+25ab` |
 
 ### `characterWitness.ignoredPaths`
 
