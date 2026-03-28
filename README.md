@@ -177,9 +177,11 @@ Glob patterns matched against each file's full path (forward slashes, cross-plat
 
 ## Commands
 
-| Command                                   | Title                                        | Available In                         |
-| ----------------------------------------- | -------------------------------------------- | ------------------------------------ |
-| `characterWitness.addToAllowedCharacters` | Character Witness: Add to Allowed Characters | Editor context menu, Command Palette |
+| Command                                      | Title                                             | Available In                         |
+| -------------------------------------------- | ------------------------------------------------- | ------------------------------------ |
+| `characterWitness.addToAllowedCharacters`    | Character Witness: Add to Allowed Characters      | Editor context menu, Command Palette |
+| `characterWitness.applyReplacements`         | Character Witness: Apply Replacements             | Editor context menu, Command Palette |
+| `characterWitness.goToNextNonAsciiCharacter` | Character Witness: Go to Next Non-ASCII Character | Editor context menu, Command Palette |
 
 ## Building
 
