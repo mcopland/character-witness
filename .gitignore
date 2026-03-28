@@ -1,16 +1,12 @@
 # Environment
 .claude/
-.git*
 .vscode/*
-zshrc.md
 
 # Build
 *.vsix
 node_modules/
 out/
-errors.json
 
 # Exceptions
-!.github/
 !.vscode/launch.json
 !.vscode/tasks.json
