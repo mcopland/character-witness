@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.4.0]
+
+### Added
+
+- `characterWitness.goToNextNonAsciiCharacter` command — navigate to the next non-ASCII character in the active document, wrapping around at end of file
+
 ## [1.3.0]
 
 ### Added
