@@ -13,8 +13,17 @@
     "vscode": "^1.109.0"
   },
   "icon": "icon.png",
-  "galleryBanner": { "color": "#1e1e1e", "theme": "dark" },
-  "keywords": ["unicode", "ascii", "non-ascii", "linter", "diagnostics"],
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "keywords": [
+    "unicode",
+    "ascii",
+    "non-ascii",
+    "linter",
+    "diagnostics"
+  ],
   "categories": [
     "Linters",
     "Other"
