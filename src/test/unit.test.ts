@@ -13,9 +13,26 @@ vi.mock("vscode", () => ({
       public line: number,
       public character: number,
     ) {}
+    isAfter(other: { line: number; character: number }): boolean {
+      if (this.line !== other.line) return this.line > other.line;
+      return this.character > other.character;
+    }
+  },
+  Selection: class {
+    constructor(
+      public anchor: any,
+      public active: any,
+    ) {}
+  },
+  TextEditorRevealType: {
+    InCenterIfOutsideViewport: 2,
   },
   workspace: {
     getWorkspaceFolder: () => undefined,
+  },
+  window: {
+    activeTextEditor: undefined as any,
+    showInformationMessage: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -24,7 +41,9 @@ vi.mock("vscode", () => ({
 // Run with:  npx vitest run
 // ---------------------------------------------------------------------------
 
+import { goToNextNonAsciiCharacter } from "../commands";
 import { compileIgnoredPaths } from "../config";
+import * as configModule from "../config";
 import { isIgnoredDocument } from "../extension";
 import { getCharacterName, UNICODE_VERSION } from "../generated/unicode-names";
 import { formatGroupedDiagnosticMessage, NonAsciiMatch } from "../scanner";
@@ -219,6 +238,19 @@ function makeMatch(char: string): NonAsciiMatch {
   };
 }
 
+function makeMatchAt(line: number, character: number): NonAsciiMatch {
+  return {
+    char: "\u00b7",
+    codePoint: 0x00b7,
+    hex: "00b7",
+    unicodeName: undefined,
+    range: new vscode.Range(
+      new vscode.Position(line, character),
+      new vscode.Position(line, character + 1),
+    ),
+  };
+}
+
 describe("formatGroupedDiagnosticMessage", () => {
   test("single match delegates to single-char format", () => {
     const m = { ...makeMatch("·"), unicodeName: "MIDDLE DOT" };
@@ -307,5 +339,77 @@ describe("isIgnoredDocument", () => {
       isIgnoredDocument(makeDoc("C:\\foo\\bar.ts"), [/foo\/bar\.ts$/]),
       true,
     );
+  });
+});
+
+describe("goToNextNonAsciiCharacter", () => {
+  let mockEditor: {
+    document: object;
+    selection:
+      | { active: InstanceType<typeof vscode.Position> }
+      | InstanceType<typeof vscode.Selection>;
+    revealRange: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    mockEditor = {
+      document: {},
+      selection: { active: new vscode.Position(0, 0) },
+      revealRange: vi.fn(),
+    };
+    (vscode.window as any).activeTextEditor = mockEditor;
+    vi.spyOn(configModule, "getConfig").mockReturnValue({
+      enable: true,
+      allowedCharacters: new Set<string>(),
+    } as any);
+    (
+      vscode.window.showInformationMessage as ReturnType<typeof vi.fn>
+    ).mockClear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    (vscode.window as any).activeTextEditor = undefined;
+  });
+
+  test("shows info message when no matches exist", async () => {
+    const getCachedMatches = vi.fn().mockReturnValue([]);
+    const originalSelection = mockEditor.selection;
+    await goToNextNonAsciiCharacter(getCachedMatches);
+    const calls = (
+      vscode.window.showInformationMessage as ReturnType<typeof vi.fn>
+    ).mock.calls;
+    assert.ok(calls.length > 0);
+    assert.ok((calls[0][0] as string).includes("No non-ASCII characters"));
+    assert.strictEqual(mockEditor.selection, originalSelection);
+  });
+
+  test("selects first match when cursor is before all matches", async () => {
+    const matches = [makeMatchAt(1, 0), makeMatchAt(2, 0)];
+    const getCachedMatches = vi.fn().mockReturnValue(matches);
+    mockEditor.selection = { active: new vscode.Position(0, 5) };
+    await goToNextNonAsciiCharacter(getCachedMatches);
+    assert.ok(mockEditor.selection instanceof vscode.Selection);
+    assert.strictEqual((mockEditor.selection as any).anchor.line, 1);
+    assert.strictEqual((mockEditor.selection as any).anchor.character, 0);
+  });
+
+  test("selects the next match after the cursor", async () => {
+    const matches = [makeMatchAt(1, 0), makeMatchAt(3, 0), makeMatchAt(5, 0)];
+    const getCachedMatches = vi.fn().mockReturnValue(matches);
+    mockEditor.selection = { active: new vscode.Position(2, 0) };
+    await goToNextNonAsciiCharacter(getCachedMatches);
+    assert.ok(mockEditor.selection instanceof vscode.Selection);
+    assert.strictEqual((mockEditor.selection as any).anchor.line, 3);
+  });
+
+  test("wraps to first match when cursor is at or after the last match", async () => {
+    const matches = [makeMatchAt(1, 0), makeMatchAt(3, 0)];
+    const getCachedMatches = vi.fn().mockReturnValue(matches);
+    mockEditor.selection = { active: new vscode.Position(5, 0) };
+    await goToNextNonAsciiCharacter(getCachedMatches);
+    assert.ok(mockEditor.selection instanceof vscode.Selection);
+    assert.strictEqual((mockEditor.selection as any).anchor.line, 1);
+    assert.strictEqual((mockEditor.selection as any).anchor.character, 0);
   });
 });
