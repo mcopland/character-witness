@@ -523,3 +523,137 @@ test("Config | ignoredPaths matching file path should produce no diagnostics", a
     fs.unlinkSync(tmpPath);
   }
 });
+
+test("Command | goToNextNonAsciiCharacter moves cursor to next non-ASCII char", async () => {
+  const { editor, document } = await openDocumentWithContent(
+    "abc\u00e9 def\u00f1 ghi",
+  );
+  editor.selection = new vscode.Selection(
+    new vscode.Position(0, 0),
+    new vscode.Position(0, 0),
+  );
+  await waitForDiagnostics(document.uri);
+  await vscode.commands.executeCommand(
+    "characterWitness.goToNextNonAsciiCharacter",
+  );
+  await new Promise(r => setTimeout(r, 200));
+  const pos = editor.selection.active;
+  assert.strictEqual(pos.line, 0);
+  assert.strictEqual(
+    pos.character,
+    3,
+    "Expected cursor at first non-ASCII char",
+  );
+});
+
+test("Command | goToNextNonAsciiCharacter wraps around at end", async () => {
+  const { editor, document } = await openDocumentWithContent(
+    "abc\u00e9 def\u00f1 ghi",
+  );
+  // Place cursor after the last non-ASCII char
+  editor.selection = new vscode.Selection(
+    new vscode.Position(0, 9),
+    new vscode.Position(0, 9),
+  );
+  await waitForDiagnostics(document.uri);
+  await vscode.commands.executeCommand(
+    "characterWitness.goToNextNonAsciiCharacter",
+  );
+  await new Promise(r => setTimeout(r, 200));
+  const pos = editor.selection.active;
+  assert.strictEqual(
+    pos.character,
+    3,
+    "Expected cursor to wrap to first match",
+  );
+});
+
+test("Command | applyReplacements replaces mapped characters", async () => {
+  await withConfig({ replacementMap: { "u+2014": "-" } }, async () => {
+    const { document } = await openDocumentWithContent("hello \u2014 world");
+    await waitForDiagnostics(document.uri);
+    await vscode.commands.executeCommand("characterWitness.applyReplacements");
+    await new Promise(r => setTimeout(r, 500));
+    const text = document.getText();
+    assert.ok(
+      text.includes("hello - world"),
+      `Expected em-dash replaced with hyphen, got "${text}"`,
+    );
+  });
+});
+
+test("Command | addToAllowedCharacters suppresses diagnostics for char at cursor", async () => {
+  const { editor, document } = await openDocumentWithContent("test \u00a9 end");
+  await waitForDiagnostics(document.uri);
+
+  // Place cursor on the non-ASCII character
+  editor.selection = new vscode.Selection(
+    new vscode.Position(0, 5),
+    new vscode.Position(0, 5),
+  );
+  await vscode.commands.executeCommand(
+    "characterWitness.addToAllowedCharacters",
+  );
+  await new Promise(r => setTimeout(r, 500));
+  const diags = vscode.languages.getDiagnostics(document.uri);
+  assert.strictEqual(
+    diags.length,
+    0,
+    "Expected 0 diagnostics after adding char to allowed list",
+  );
+
+  // Clean up: remove the allowed character
+  const cfg = vscode.workspace.getConfiguration("characterWitness");
+  await cfg.update(
+    "allowedCharacters",
+    undefined,
+    vscode.ConfigurationTarget.Global,
+  );
+  await new Promise(r => setTimeout(r, 200));
+});
+
+test("Hover | Non-ASCII character shows hover with name and code point", async () => {
+  const { document } = await openDocumentWithContent("\u00e9");
+  await waitForDiagnostics(document.uri);
+  const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+    "vscode.executeHoverProvider",
+    document.uri,
+    new vscode.Position(0, 0),
+  );
+  assert.ok(hovers && hovers.length > 0, "Expected at least one hover result");
+  const content = hovers
+    .flatMap(h => h.contents)
+    .map(c => (typeof c === "string" ? c : (c as vscode.MarkdownString).value))
+    .join(" ");
+  assert.ok(
+    content.includes("00E9") || content.includes("00e9"),
+    `Expected hover to include code point, got "${content}"`,
+  );
+});
+
+test("Multi-line | Non-ASCII on separate lines produces one diagnostic per line", async () => {
+  const { document } = await openDocumentWithContent(
+    "abc \u00e9\ndef \u00f1\nghi \u00fc",
+  );
+  const diags = await waitForDiagnostics(document.uri);
+  assert.strictEqual(
+    diags.length,
+    3,
+    `Expected 3 diagnostics (one per line), got ${diags.length}`,
+  );
+  const lines = diags.map(d => d.range.start.line).sort();
+  assert.deepStrictEqual(lines, [0, 1, 2]);
+});
+
+test("Config | Range entries in allowedCharacters suppress all characters in range", async () => {
+  await withConfig({ allowedCharacters: ["u+2500 - u+2502"] }, async () => {
+    const { document } = await openDocumentWithContent("\u2500\u2501\u2502");
+    await new Promise(r => setTimeout(r, 500));
+    const diags = vscode.languages.getDiagnostics(document.uri);
+    assert.strictEqual(
+      diags.length,
+      0,
+      "Expected 0 diagnostics for chars within allowed range",
+    );
+  });
+});
