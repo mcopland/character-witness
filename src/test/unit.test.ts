@@ -20,8 +20,8 @@ vi.mock("vscode", () => ({
   },
   Selection: class {
     constructor(
-      public anchor: any,
-      public active: any,
+      public anchor: { line: number; character: number },
+      public active: { line: number; character: number },
     ) {}
   },
   TextEditorRevealType: {
@@ -31,7 +31,7 @@ vi.mock("vscode", () => ({
     getWorkspaceFolder: () => undefined,
   },
   window: {
-    activeTextEditor: undefined as any,
+    activeTextEditor: undefined as unknown,
     showInformationMessage: vi.fn().mockResolvedValue(undefined),
   },
 }));
@@ -42,7 +42,7 @@ vi.mock("vscode", () => ({
 // ---------------------------------------------------------------------------
 
 import { goToNextNonAsciiCharacter } from "../commands";
-import { compileIgnoredPaths } from "../config";
+import { compileIgnoredPaths, ExtensionConfig } from "../config";
 import * as configModule from "../config";
 import { isIgnoredDocument } from "../extension";
 import { getCharacterName, UNICODE_VERSION } from "../generated/unicode-names";
@@ -357,13 +357,14 @@ describe("goToNextNonAsciiCharacter", () => {
       selection: { active: new vscode.Position(0, 0) },
       revealRange: vi.fn(),
     };
-    (vscode.window as any).activeTextEditor = mockEditor;
+    (vscode.window as { activeTextEditor: unknown }).activeTextEditor =
+      mockEditor;
     vi.spyOn(configModule, "getConfig").mockReturnValue({
       enable: true,
       allowedCharacters: new Set<string>(),
       includeStrings: true,
       includeComments: true,
-    } as any);
+    } as ExtensionConfig);
     (
       vscode.window.showInformationMessage as ReturnType<typeof vi.fn>
     ).mockClear();
@@ -371,7 +372,8 @@ describe("goToNextNonAsciiCharacter", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    (vscode.window as any).activeTextEditor = undefined;
+    (vscode.window as { activeTextEditor: unknown }).activeTextEditor =
+      undefined;
   });
 
   test("shows info message when no matches exist", async () => {
@@ -392,8 +394,9 @@ describe("goToNextNonAsciiCharacter", () => {
     mockEditor.selection = { active: new vscode.Position(0, 5) };
     await goToNextNonAsciiCharacter(getCachedMatches);
     assert.ok(mockEditor.selection instanceof vscode.Selection);
-    assert.strictEqual((mockEditor.selection as any).anchor.line, 1);
-    assert.strictEqual((mockEditor.selection as any).anchor.character, 0);
+    const sel1 = mockEditor.selection as InstanceType<typeof vscode.Selection>;
+    assert.strictEqual(sel1.anchor.line, 1);
+    assert.strictEqual(sel1.anchor.character, 0);
   });
 
   test("selects the next match after the cursor", async () => {
@@ -402,7 +405,8 @@ describe("goToNextNonAsciiCharacter", () => {
     mockEditor.selection = { active: new vscode.Position(2, 0) };
     await goToNextNonAsciiCharacter(getCachedMatches);
     assert.ok(mockEditor.selection instanceof vscode.Selection);
-    assert.strictEqual((mockEditor.selection as any).anchor.line, 3);
+    const sel2 = mockEditor.selection as InstanceType<typeof vscode.Selection>;
+    assert.strictEqual(sel2.anchor.line, 3);
   });
 
   test("wraps to first match when cursor is at or after the last match", async () => {
@@ -411,7 +415,8 @@ describe("goToNextNonAsciiCharacter", () => {
     mockEditor.selection = { active: new vscode.Position(5, 0) };
     await goToNextNonAsciiCharacter(getCachedMatches);
     assert.ok(mockEditor.selection instanceof vscode.Selection);
-    assert.strictEqual((mockEditor.selection as any).anchor.line, 1);
-    assert.strictEqual((mockEditor.selection as any).anchor.character, 0);
+    const sel3 = mockEditor.selection as InstanceType<typeof vscode.Selection>;
+    assert.strictEqual(sel3.anchor.line, 1);
+    assert.strictEqual(sel3.anchor.character, 0);
   });
 });
