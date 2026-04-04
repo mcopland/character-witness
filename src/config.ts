@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { log } from "./logger";
 import { ERROR_LEVEL_CODEPOINTS } from "./scanner";
-import { parseCharacterEntry } from "./utils";
+import { parseCharacterEntries, parseCharacterEntry } from "./utils";
 
 const DEFAULT_DECORATION: Record<string, string> = {
   backgroundColor: "rgba(125, 249, 255, 0.2)",
@@ -152,8 +152,9 @@ function readConfig(): ExtensionConfig {
   const rawAllowed = cfg.get<string[]>("allowedCharacters", []);
   const allowedSet = new Set<string>();
   for (const entry of rawAllowed) {
-    const ch = parseCharacterEntry(entry);
-    if (ch) allowedSet.add(ch);
+    for (const ch of parseCharacterEntries(entry)) {
+      allowedSet.add(ch);
+    }
   }
 
   const rawDecoration = cfg.get<Record<string, string>>("decoration", {});
