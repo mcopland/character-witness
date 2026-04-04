@@ -368,9 +368,7 @@ test("Filtering | Chars outside strings/comments should still be flagged even wh
       const { document } = await openDocumentWithContent(
         "const x = 42 \u2014 3;",
       );
-      await vscode.languages.setTextDocumentLanguage(document, "javascript");
-      await new Promise(r => setTimeout(r, 600));
-      const diags = vscode.languages.getDiagnostics(document.uri);
+      const diags = await waitForDiagnostics(document.uri);
       assert.ok(
         diags.length >= 1,
         `Expected >=1 diagnostic for char outside string/comment, got ${diags.length}`,
