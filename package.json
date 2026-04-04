@@ -2,7 +2,7 @@
   "name": "character-witness",
   "displayName": "Character Witness",
   "description": "Detect, highlight, diagnose, and optionally auto-replace non-ASCII characters in your files.",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "publisher": "character-witness",
   "license": "MIT",
   "repository": {
