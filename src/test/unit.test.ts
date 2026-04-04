@@ -27,6 +27,15 @@ vi.mock("vscode", () => ({
   TextEditorRevealType: {
     InCenterIfOutsideViewport: 2,
   },
+  DiagnosticSeverity: {
+    Error: 0,
+    Warning: 1,
+    Information: 2,
+    Hint: 3,
+  },
+  MarkdownString: class {
+    constructor(public value: string) {}
+  },
   workspace: {
     getWorkspaceFolder: () => undefined,
   },
@@ -42,13 +51,24 @@ vi.mock("vscode", () => ({
 // ---------------------------------------------------------------------------
 
 import { goToNextNonAsciiCharacter } from "../commands";
-import { compileIgnoredPaths, ExtensionConfig } from "../config";
+import {
+  compileIgnoredPaths,
+  ExtensionConfig,
+  getCharacterSeverity,
+} from "../config";
 import * as configModule from "../config";
 import { isIgnoredDocument } from "../extension";
 import { getCharacterName, UNICODE_VERSION } from "../generated/unicode-names";
-import { formatGroupedDiagnosticMessage, NonAsciiMatch } from "../scanner";
+import { getTextRegions } from "../regions";
+import {
+  findNonAsciiCharacters,
+  formatGroupedDiagnosticMessage,
+  formatHoverMarkdown,
+  NonAsciiMatch,
+} from "../scanner";
 import {
   formatCodePoint,
+  formatUPlus,
   parseCharacterEntries,
   parseCharacterEntry,
   titleCase,
@@ -418,5 +438,363 @@ describe("goToNextNonAsciiCharacter", () => {
     const sel3 = mockEditor.selection as InstanceType<typeof vscode.Selection>;
     assert.strictEqual(sel3.anchor.line, 1);
     assert.strictEqual(sel3.anchor.character, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getTextRegions
+// ---------------------------------------------------------------------------
+
+describe("getTextRegions", () => {
+  test("JS/TS: detects line comments", () => {
+    const regions = getTextRegions("// hello", "javascript");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "comment");
+    assert.strictEqual(regions[0].start, 0);
+    assert.strictEqual(regions[0].end, 8);
+  });
+
+  test("JS/TS: detects block comments", () => {
+    const regions = getTextRegions("/* block */", "typescript");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "comment");
+    assert.strictEqual(regions[0].start, 0);
+    assert.strictEqual(regions[0].end, 11);
+  });
+
+  test("JS/TS: detects double-quoted strings", () => {
+    const regions = getTextRegions('x = "hello"', "javascript");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "string");
+    assert.strictEqual(regions[0].start, 4);
+    assert.strictEqual(regions[0].end, 11);
+  });
+
+  test("JS/TS: detects single-quoted strings", () => {
+    const regions = getTextRegions("x = 'hello'", "typescript");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "string");
+  });
+
+  test("JS/TS: detects template literals", () => {
+    const regions = getTextRegions("x = `hello`", "javascriptreact");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "string");
+  });
+
+  test("JS/TS: handles escaped quotes inside strings", () => {
+    const regions = getTextRegions('x = "he\\"llo"', "javascript");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "string");
+    assert.strictEqual(regions[0].end, 13);
+  });
+
+  test("JS/TS: detects multiple regions", () => {
+    const code = '// comment\nconst x = "str";';
+    const regions = getTextRegions(code, "javascript");
+    assert.strictEqual(regions.length, 2);
+    assert.strictEqual(regions[0].type, "comment");
+    assert.strictEqual(regions[1].type, "string");
+  });
+
+  test("Python: detects hash comments", () => {
+    const regions = getTextRegions("# comment", "python");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "comment");
+  });
+
+  test("Python: detects triple-double-quoted strings", () => {
+    const regions = getTextRegions('x = """hello"""', "python");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "string");
+  });
+
+  test("Python: detects triple-single-quoted strings", () => {
+    const regions = getTextRegions("x = '''hello'''", "python");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "string");
+  });
+
+  test("Ruby/shell: detects hash comments and strings", () => {
+    const code = '# comment\nx = "str"';
+    const regions = getTextRegions(code, "ruby");
+    assert.strictEqual(regions.length, 2);
+    assert.strictEqual(regions[0].type, "comment");
+    assert.strictEqual(regions[1].type, "string");
+  });
+
+  test("HTML: detects HTML comments", () => {
+    const regions = getTextRegions("<!-- comment -->", "html");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "comment");
+  });
+
+  test("HTML: detects attribute strings", () => {
+    const regions = getTextRegions('<a href="url">', "html");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "string");
+  });
+
+  test("SQL: detects line comments and single-quoted strings", () => {
+    const code = "-- comment\nSELECT 'value'";
+    const regions = getTextRegions(code, "sql");
+    assert.strictEqual(regions.length, 2);
+    assert.strictEqual(regions[0].type, "comment");
+    assert.strictEqual(regions[1].type, "string");
+  });
+
+  test("SQL: detects block comments", () => {
+    const regions = getTextRegions("/* block */", "sql");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "comment");
+  });
+
+  test("Lua: detects block comments", () => {
+    const regions = getTextRegions("--[[ block ]]", "lua");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "comment");
+  });
+
+  test("Lua: detects line comments", () => {
+    const regions = getTextRegions("-- line comment", "lua");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "comment");
+  });
+
+  test("default language: detects only strings", () => {
+    const code = '// not a comment\n"a string"';
+    const regions = getTextRegions(code, "unknownlang");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "string");
+  });
+
+  test("empty input returns empty array", () => {
+    const regions = getTextRegions("", "javascript");
+    assert.strictEqual(regions.length, 0);
+  });
+
+  test("applies to css/scss/less language family", () => {
+    const regions = getTextRegions("/* comment */", "css");
+    assert.strictEqual(regions.length, 1);
+    assert.strictEqual(regions[0].type, "comment");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getCharacterSeverity
+// ---------------------------------------------------------------------------
+
+describe("getCharacterSeverity", () => {
+  const baseConfig = {
+    enable: true,
+    decoration: {},
+    allowedCharacters: new Set<string>(),
+    autoReplaceOnSave: false,
+    replacements: [],
+    severityOverrides: new Map<string, number>(),
+    includeStrings: true,
+    includeComments: true,
+    codePointFormat: "u+",
+    codePointCase: "upper",
+    ignoredPaths: [],
+    diagnosticSeverities: new Set([0, 1, 2]),
+  } as ExtensionConfig;
+
+  test("returns Error for error-level codepoints", () => {
+    const severity = getCharacterSeverity("\u00a0", baseConfig);
+    assert.strictEqual(severity, vscode.DiagnosticSeverity.Error);
+  });
+
+  test("returns Information for ordinary non-ASCII", () => {
+    const severity = getCharacterSeverity("\u00e9", baseConfig);
+    assert.strictEqual(severity, vscode.DiagnosticSeverity.Information);
+  });
+
+  test("user override takes precedence over error-level", () => {
+    const config = {
+      ...baseConfig,
+      severityOverrides: new Map([
+        ["\u00a0", vscode.DiagnosticSeverity.Warning],
+      ]),
+    } as ExtensionConfig;
+    const severity = getCharacterSeverity("\u00a0", config);
+    assert.strictEqual(severity, vscode.DiagnosticSeverity.Warning);
+  });
+
+  test("user override for non-error-level character", () => {
+    const config = {
+      ...baseConfig,
+      severityOverrides: new Map([["\u00e9", vscode.DiagnosticSeverity.Error]]),
+    } as ExtensionConfig;
+    const severity = getCharacterSeverity("\u00e9", config);
+    assert.strictEqual(severity, vscode.DiagnosticSeverity.Error);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatUPlus
+// ---------------------------------------------------------------------------
+
+describe("formatUPlus", () => {
+  test("lowercases and prepends u+", () => {
+    assert.strictEqual(formatUPlus("00A3"), "u+00a3");
+  });
+
+  test("already lowercase input", () => {
+    assert.strictEqual(formatUPlus("2014"), "u+2014");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatHoverMarkdown
+// ---------------------------------------------------------------------------
+
+describe("formatHoverMarkdown", () => {
+  function makeHoverMatch(unicodeName: string | undefined): NonAsciiMatch {
+    return {
+      char: "\u2014",
+      codePoint: 0x2014,
+      hex: "2014",
+      unicodeName,
+      range: new vscode.Range(
+        new vscode.Position(0, 0),
+        new vscode.Position(0, 1),
+      ),
+    };
+  }
+
+  test("match with unicode name includes bold name and code", () => {
+    const md = formatHoverMarkdown(makeHoverMatch("EM DASH"));
+    assert.ok(md.value.includes("**Em Dash**"));
+    assert.ok(md.value.includes("2014"));
+  });
+
+  test("match without unicode name includes only code", () => {
+    const md = formatHoverMarkdown(makeHoverMatch(undefined));
+    assert.ok(!md.value.includes("**"));
+    assert.ok(md.value.includes("2014"));
+  });
+
+  test("respects format and case options", () => {
+    const md = formatHoverMarkdown(makeHoverMatch("EM DASH"), "0x", "lower");
+    assert.ok(md.value.includes("0x2014"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findNonAsciiCharacters
+// ---------------------------------------------------------------------------
+
+describe("findNonAsciiCharacters", () => {
+  function mockDocument(text: string, languageId = "plaintext") {
+    return {
+      getText: () => text,
+      languageId,
+    } as unknown as vscode.TextDocument;
+  }
+
+  test("finds non-ASCII characters with correct fields", () => {
+    const doc = mockDocument("a\u00e9b");
+    const matches = findNonAsciiCharacters(doc, new Set());
+    assert.strictEqual(matches.length, 1);
+    assert.strictEqual(matches[0].char, "\u00e9");
+    assert.strictEqual(matches[0].codePoint, 0x00e9);
+    assert.strictEqual(matches[0].hex, "00e9");
+    assert.strictEqual(matches[0].range.start.line, 0);
+    assert.strictEqual(matches[0].range.start.character, 1);
+    assert.strictEqual(matches[0].range.end.character, 2);
+  });
+
+  test("returns empty for ASCII-only text", () => {
+    const doc = mockDocument("hello world 123");
+    const matches = findNonAsciiCharacters(doc, new Set());
+    assert.strictEqual(matches.length, 0);
+  });
+
+  test("respects allowedCharacters", () => {
+    const doc = mockDocument("\u00e9\u00f1");
+    const allowed = new Set(["\u00e9"]);
+    const matches = findNonAsciiCharacters(doc, allowed);
+    assert.strictEqual(matches.length, 1);
+    assert.strictEqual(matches[0].char, "\u00f1");
+  });
+
+  test("handles surrogate pairs", () => {
+    const doc = mockDocument("a\u{1F600}b");
+    const matches = findNonAsciiCharacters(doc, new Set());
+    assert.strictEqual(matches.length, 1);
+    assert.strictEqual(matches[0].codePoint, 0x1f600);
+    assert.strictEqual(matches[0].hex, "1f600");
+    assert.strictEqual(matches[0].range.start.character, 1);
+    assert.strictEqual(matches[0].range.end.character, 3);
+  });
+
+  test("tracks line and column across multiple lines", () => {
+    const doc = mockDocument("abc\ndef\u00e9g\nhij\u00f1");
+    const matches = findNonAsciiCharacters(doc, new Set());
+    assert.strictEqual(matches.length, 2);
+    assert.strictEqual(matches[0].range.start.line, 1);
+    assert.strictEqual(matches[0].range.start.character, 3);
+    assert.strictEqual(matches[1].range.start.line, 2);
+    assert.strictEqual(matches[1].range.start.character, 3);
+  });
+
+  test("handles CRLF line endings", () => {
+    const doc = mockDocument("abc\r\ndef\u00e9");
+    const matches = findNonAsciiCharacters(doc, new Set());
+    assert.strictEqual(matches.length, 1);
+    assert.strictEqual(matches[0].range.start.line, 1);
+    assert.strictEqual(matches[0].range.start.character, 3);
+  });
+
+  test("handles bare CR line endings", () => {
+    const doc = mockDocument("abc\rdef\u00e9");
+    const matches = findNonAsciiCharacters(doc, new Set());
+    assert.strictEqual(matches.length, 1);
+    assert.strictEqual(matches[0].range.start.line, 1);
+    assert.strictEqual(matches[0].range.start.character, 3);
+  });
+
+  test("includeStrings=false skips characters in strings", () => {
+    const doc = mockDocument('const x = "\u00e9";', "javascript");
+    const matches = findNonAsciiCharacters(
+      doc,
+      new Set(),
+      false,
+      true,
+      "javascript",
+    );
+    assert.strictEqual(matches.length, 0);
+  });
+
+  test("includeComments=false skips characters in comments", () => {
+    const doc = mockDocument("// \u00e9", "javascript");
+    const matches = findNonAsciiCharacters(
+      doc,
+      new Set(),
+      true,
+      false,
+      "javascript",
+    );
+    assert.strictEqual(matches.length, 0);
+  });
+
+  test("characters outside strings/comments found even when filters active", () => {
+    const doc = mockDocument('const \u00e9 = "\u00f1";', "javascript");
+    const matches = findNonAsciiCharacters(
+      doc,
+      new Set(),
+      false,
+      false,
+      "javascript",
+    );
+    assert.strictEqual(matches.length, 1);
+    assert.strictEqual(matches[0].char, "\u00e9");
+  });
+
+  test("returns empty for empty document", () => {
+    const doc = mockDocument("");
+    const matches = findNonAsciiCharacters(doc, new Set());
+    assert.strictEqual(matches.length, 0);
   });
 });
