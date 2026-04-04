@@ -6,6 +6,8 @@ import { NonAsciiMatch } from "./scanner";
 type GetCachedMatchesFn = (
   doc: vscode.TextDocument,
   allowed: Set<string>,
+  includeStrings: boolean,
+  includeComments: boolean,
 ) => NonAsciiMatch[];
 
 function buildEdits(
@@ -13,7 +15,12 @@ function buildEdits(
   getCachedMatchesFn: GetCachedMatchesFn,
 ): vscode.TextEdit[] {
   const config = getConfig();
-  const matches = getCachedMatchesFn(document, config.allowedCharacters);
+  const matches = getCachedMatchesFn(
+    document,
+    config.allowedCharacters,
+    config.includeStrings,
+    config.includeComments,
+  );
   if (matches.length === 0) return [];
 
   const repMap = new Map<string, string>();
