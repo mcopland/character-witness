@@ -361,6 +361,8 @@ describe("goToNextNonAsciiCharacter", () => {
     vi.spyOn(configModule, "getConfig").mockReturnValue({
       enable: true,
       allowedCharacters: new Set<string>(),
+      includeStrings: true,
+      includeComments: true,
     } as any);
     (
       vscode.window.showInformationMessage as ReturnType<typeof vi.fn>
