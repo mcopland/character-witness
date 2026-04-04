@@ -9,6 +9,8 @@ export async function goToNextNonAsciiCharacter(
   getCachedMatchesFn: (
     doc: vscode.TextDocument,
     allowed: Set<string>,
+    includeStrings: boolean,
+    includeComments: boolean,
   ) => NonAsciiMatch[],
 ): Promise<void> {
   try {
@@ -21,6 +23,8 @@ export async function goToNextNonAsciiCharacter(
     const matches = getCachedMatchesFn(
       editor.document,
       config.allowedCharacters,
+      config.includeStrings,
+      config.includeComments,
     );
     if (matches.length === 0) {
       vscode.window.showInformationMessage(
@@ -49,6 +53,8 @@ export async function applyReplacementsNow(
   getCachedMatchesFn: (
     doc: vscode.TextDocument,
     allowed: Set<string>,
+    includeStrings: boolean,
+    includeComments: boolean,
   ) => NonAsciiMatch[],
   onComplete?: (editor: vscode.TextEditor) => void,
 ): Promise<void> {
