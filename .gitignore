@@ -10,3 +10,6 @@ out/
 # Exceptions
 !.vscode/launch.json
 !.vscode/tasks.json
+
+# Testing
+.vscode-test/
