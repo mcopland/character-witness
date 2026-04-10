@@ -71,6 +71,7 @@ import {
   formatUPlus,
   parseCharacterEntries,
   parseCharacterEntry,
+  parseCharacterGroup,
   titleCase,
   toHex,
 } from "../utils";
@@ -144,6 +145,50 @@ describe("parseCharacterEntries", () => {
     assert.strictEqual(parseCharacterEntries("0x2018 - 0x2020").length, 9));
   test("range with mixed formats", () =>
     assert.strictEqual(parseCharacterEntries("u+2018 - 0x2020").length, 9));
+});
+
+describe("parseCharacterGroup", () => {
+  test("single entry returns one-element array", () => {
+    assert.deepStrictEqual(parseCharacterGroup("u+00a0"), ["\u00a0"]);
+  });
+
+  test("range returns all characters inclusive", () => {
+    assert.deepStrictEqual(parseCharacterGroup("u+25aa - u+25ab"), [
+      "\u25aa",
+      "\u25ab",
+    ]);
+  });
+
+  test("comma-separated list returns all listed characters", () => {
+    assert.deepStrictEqual(parseCharacterGroup("u+25aa, u+25ab, u+25e6"), [
+      "\u25aa",
+      "\u25ab",
+      "\u25e6",
+    ]);
+  });
+
+  test("combined range and single entry", () => {
+    assert.deepStrictEqual(parseCharacterGroup("u+25aa - u+25ab, u+25e6"), [
+      "\u25aa",
+      "\u25ab",
+      "\u25e6",
+    ]);
+  });
+
+  test("extra whitespace around tokens is ignored", () => {
+    assert.deepStrictEqual(parseCharacterGroup("  u+25aa ,  u+25ab  "), [
+      "\u25aa",
+      "\u25ab",
+    ]);
+  });
+
+  test("fully invalid input returns empty array", () => {
+    assert.deepStrictEqual(parseCharacterGroup("garbage"), []);
+  });
+
+  test("range with start > end returns empty array", () => {
+    assert.deepStrictEqual(parseCharacterGroup("u+25ab - u+25aa"), []);
+  });
 });
 
 describe("titleCase", () => {

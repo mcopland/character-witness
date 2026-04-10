@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
 import { log } from "./logger";
 import { ERROR_LEVEL_CODEPOINTS } from "./scanner";
-import { parseCharacterEntries, parseCharacterEntry } from "./utils";
+import {
+  parseCharacterEntries,
+  parseCharacterEntry,
+  parseCharacterGroup,
+} from "./utils";
 
 const DEFAULT_DECORATION: Record<string, string> = {
   backgroundColor: "rgba(125, 249, 255, 0.2)",
@@ -52,8 +56,7 @@ export interface ReplacementEntry {
 function parseReplacementMap(raw: Record<string, string>): ReplacementEntry[] {
   const entries: ReplacementEntry[] = [];
   for (const [key, value] of Object.entries(raw)) {
-    const fromChar = parseCharacterEntry(key);
-    if (fromChar) {
+    for (const fromChar of parseCharacterGroup(key)) {
       entries.push({ from: fromChar, to: value });
     }
   }

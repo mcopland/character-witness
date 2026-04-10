@@ -2,7 +2,7 @@
   "name": "character-witness",
   "displayName": "Character Witness",
   "description": "Detect, highlight, diagnose, and optionally auto-replace non-ASCII characters in your files.",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "publisher": "character-witness",
   "license": "MIT",
   "repository": {
@@ -115,13 +115,18 @@
           "additionalProperties": {
             "type": "string"
           },
-          "markdownDescription": "Map of non-ASCII characters to their ASCII replacements. To be used with the **autoReplaceOnSave** setting.",
+          "markdownDescription": "Map of non-ASCII characters to their ASCII replacements. To be used with the **autoReplaceOnSave** setting.\n\nKeys accept a single code point (`\"u+2013\"`), a range (`\"u+2013 - u+2015\"`), a comma-separated list (`\"u+2018, u+2019\"`), or a combination (`\"u+2013 - u+2015, u+2018\"`).",
           "examples": [
             {
               "u+2013": "-",
               "u+2018": "'",
               "u+201c": "\"",
               "u+201d": "\""
+            },
+            {
+              "u+2013 - u+2015": "-",
+              "u+2018, u+2019": "'",
+              "u+201c, u+201d": "\""
             }
           ]
         },
@@ -227,7 +232,7 @@
     "generate": "ts-node --project scripts/tsconfig.json scripts/generate-unicode-data.ts",
     "lint": "eslint src/**/*.ts",
     "package": "vsce package",
-    "test:integration": "node out/test/runTests.js",
+    "test:integration": "node ./out/test/runTests",
     "test:unit": "vitest run",
     "vscode:prepublish": "npm run generate && npm run compile",
     "watch": "tsc -watch -p ./"

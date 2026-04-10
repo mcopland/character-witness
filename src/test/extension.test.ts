@@ -298,9 +298,33 @@ test("Severity | Error-level characters (e.g. NBSP) should produce Error severit
 });
 
 test("Severity | Severity overrides should change severity", async () => {
+  const { document } = await openDocumentWithContent("hello\u00a0world");
+  await waitForDiagnostics(document.uri);
+
+  // Register before changing config so the event cannot fire and be missed
+  // during withConfig's 200 ms propagation wait. Promises cache their resolved
+  // value, so fn() gets it immediately if the event already fired.
+  const infoPromise = new Promise<vscode.Diagnostic[]>(resolve => {
+    const timer = setTimeout(() => {
+      sub.dispose();
+      resolve(vscode.languages.getDiagnostics(document.uri));
+    }, 3000);
+    const sub = vscode.languages.onDidChangeDiagnostics(e => {
+      if (!e.uris.some(u => u.toString() === document.uri.toString())) return;
+      const d = vscode.languages.getDiagnostics(document.uri);
+      if (
+        d.length > 0 &&
+        d[0].severity === vscode.DiagnosticSeverity.Information
+      ) {
+        clearTimeout(timer);
+        sub.dispose();
+        resolve(d);
+      }
+    });
+  });
+
   await withConfig({ severityOverrides: { "u+00a0": "info" } }, async () => {
-    const { document } = await openDocumentWithContent("hello\u00a0world");
-    const diags = await waitForDiagnostics(document.uri);
+    const diags = await infoPromise;
     assert.ok(diags.length >= 1, "Expected at least 1 diagnostic");
     assert.strictEqual(
       diags[0].severity,
