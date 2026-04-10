@@ -59,6 +59,21 @@ export function parseCharacterEntries(entry: string): string[] {
 }
 
 /**
+ * Parse a replacement-map key that may contain comma-separated tokens, each
+ * of which is a single character entry or a range. Returns the union of all
+ * matched characters (empty array on fully invalid input).
+ */
+export function parseCharacterGroup(key: string): string[] {
+  const result: string[] = [];
+  for (const token of key.split(",")) {
+    for (const ch of parseCharacterEntries(token.trim())) {
+      result.push(ch);
+    }
+  }
+  return result;
+}
+
+/**
  * Return a title-cased version of a Unicode name.
  * "EM DASH" -> "Em Dash"
  */
