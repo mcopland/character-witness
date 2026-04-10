@@ -232,7 +232,7 @@
     "generate": "ts-node --project scripts/tsconfig.json scripts/generate-unicode-data.ts",
     "lint": "eslint src/**/*.ts",
     "package": "vsce package",
-    "test:integration": "node out/test/runTests.js",
+    "test:integration": "node ./out/test/runTests",
     "test:unit": "vitest run",
     "vscode:prepublish": "npm run generate && npm run compile",
     "watch": "tsc -watch -p ./"
