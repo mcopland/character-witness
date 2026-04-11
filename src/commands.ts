@@ -17,7 +17,7 @@ export async function goToNextNonAsciiCharacter(
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
 
-    const config = getConfig();
+    const config = getConfig(editor.document.uri);
     if (!config.enable) return;
 
     const matches = getCachedMatchesFn(
@@ -62,7 +62,7 @@ export async function applyReplacementsNow(
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
 
-    const config = getConfig();
+    const config = getConfig(editor.document.uri);
     if (!config.enable) return;
 
     const edits = buildReplacementsOnDemand(
@@ -97,7 +97,7 @@ export async function addToAllowedCharacters(
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
 
-    const config = getConfig();
+    const config = getConfig(editor.document.uri);
     if (!config.enable) return;
 
     // Determine which character(s) to add.
