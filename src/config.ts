@@ -148,10 +148,11 @@ export function getCharacterSeverity(
   return vscode.DiagnosticSeverity.Information;
 }
 
-let cachedConfig: ExtensionConfig | undefined;
+const GLOBAL_CACHE_KEY = "__global__";
+const cachedConfigs = new Map<string, ExtensionConfig>();
 
-function readConfig(): ExtensionConfig {
-  const cfg = vscode.workspace.getConfiguration("characterWitness");
+function readConfig(resource: vscode.Uri | undefined): ExtensionConfig {
+  const cfg = vscode.workspace.getConfiguration("characterWitness", resource);
   const rawAllowed = cfg.get<string[]>("allowedCharacters", []);
   const allowedSet = new Set<string>();
   for (const entry of rawAllowed) {
@@ -200,13 +201,16 @@ function readConfig(): ExtensionConfig {
   };
 }
 
-export function getConfig(): ExtensionConfig {
-  if (cachedConfig) return cachedConfig;
-  cachedConfig = readConfig();
-  return cachedConfig;
+export function getConfig(resource?: vscode.Uri): ExtensionConfig {
+  const key = resource ? resource.toString() : GLOBAL_CACHE_KEY;
+  const existing = cachedConfigs.get(key);
+  if (existing) return existing;
+  const fresh = readConfig(resource);
+  cachedConfigs.set(key, fresh);
+  return fresh;
 }
 
 export function invalidateConfigCache(): void {
-  cachedConfig = undefined;
+  cachedConfigs.clear();
   log("config cache invalidated");
 }

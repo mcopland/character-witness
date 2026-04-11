@@ -14,7 +14,7 @@ function buildEdits(
   document: vscode.TextDocument,
   getCachedMatchesFn: GetCachedMatchesFn,
 ): vscode.TextEdit[] {
-  const config = getConfig();
+  const config = getConfig(document.uri);
   const matches = getCachedMatchesFn(
     document,
     config.allowedCharacters,
@@ -43,7 +43,7 @@ export function buildReplacementEdits(
   getCachedMatchesFn: GetCachedMatchesFn,
 ): vscode.TextEdit[] {
   try {
-    const config = getConfig();
+    const config = getConfig(document.uri);
     if (!config.enable || !config.autoReplaceOnSave) return [];
     return buildEdits(document, getCachedMatchesFn);
   } catch (err) {
@@ -57,7 +57,7 @@ export function buildReplacementsOnDemand(
   getCachedMatchesFn: GetCachedMatchesFn,
 ): vscode.TextEdit[] {
   try {
-    const config = getConfig();
+    const config = getConfig(document.uri);
     if (!config.enable) return [];
     return buildEdits(document, getCachedMatchesFn);
   } catch (err) {

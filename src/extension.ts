@@ -82,7 +82,7 @@ function getCachedMatches(
 
 function updateEditor(editor: vscode.TextEditor): void {
   try {
-    const config = getConfig();
+    const config = getConfig(editor.document.uri);
 
     if (!config.enable) {
       clearEditor(editor);
@@ -239,7 +239,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.workspace.onWillSaveTextDocument(event => {
       try {
-        const config = getConfig();
+        const config = getConfig(event.document.uri);
         if (!config.enable) return;
         if (isIgnoredDocument(event.document, config.ignoredPaths)) return;
         event.waitUntil(
@@ -265,7 +265,7 @@ export function activate(context: vscode.ExtensionContext): void {
       { scheme: "*" },
       {
         provideHover(document, position) {
-          const config = getConfig();
+          const config = getConfig(document.uri);
           const matches = getCachedMatches(
             document,
             config.allowedCharacters,

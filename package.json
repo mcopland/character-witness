@@ -72,6 +72,7 @@
         "characterWitness.enable": {
           "type": "boolean",
           "default": true,
+          "scope": "language-overridable",
           "description": "Enable or disable the Character Witness extension."
         },
         "characterWitness.decoration": {
@@ -96,6 +97,7 @@
           "items": {
             "type": "string"
           },
+          "scope": "language-overridable",
           "description": "Characters to ignore (will not be highlighted or diagnosed). Accepts individual entries (\"u+00a3\") or ranges (\"u+2500 - u+2505\").",
           "examples": [
             [
@@ -108,6 +110,7 @@
         "characterWitness.autoReplaceOnSave": {
           "type": "boolean",
           "default": false,
+          "scope": "language-overridable",
           "markdownDescription": "Automatically replace non-ASCII characters when saving a file. Replacement characters are defined in the **replacementMap** setting."
         },
         "characterWitness.replacementMap": {
@@ -115,6 +118,7 @@
           "additionalProperties": {
             "type": "string"
           },
+          "scope": "language-overridable",
           "markdownDescription": "Map of non-ASCII characters to their ASCII replacements. To be used with the **autoReplaceOnSave** setting.\n\nKeys accept a single code point (`\"u+2013\"`), a range (`\"u+2013 - u+2015\"`), a comma-separated list (`\"u+2018, u+2019\"`), or a combination (`\"u+2013 - u+2015, u+2018\"`).",
           "examples": [
             {
@@ -140,6 +144,7 @@
               "info"
             ]
           },
+          "scope": "language-overridable",
           "description": "Override the diagnostic severity for specific characters.",
           "examples": [
             {
@@ -151,11 +156,13 @@
         "characterWitness.includeStrings": {
           "type": "boolean",
           "default": true,
+          "scope": "language-overridable",
           "description": "Whether to flag non-ASCII characters inside string literals. When false, characters within strings are ignored."
         },
         "characterWitness.includeComments": {
           "type": "boolean",
           "default": true,
+          "scope": "language-overridable",
           "description": "Whether to flag non-ASCII characters inside comments. When false, characters within comments are ignored."
         },
         "characterWitness.diagnosticSeverities": {
@@ -173,6 +180,7 @@
             "warning",
             "info"
           ],
+          "scope": "language-overridable",
           "description": "Which severity levels are shown in the Problems panel. Remove levels to suppress those diagnostics while keeping decorations. Use [] to disable all diagnostics."
         },
         "characterWitness.codePointFormat": {
@@ -190,6 +198,7 @@
             "0x2019 C-style hex notation"
           ],
           "default": "u+",
+          "scope": "language-overridable",
           "description": "How code points are displayed in hover text, diagnostics, and notifications. Also controls the format written to settings when using 'Add to Allowed Characters'."
         },
         "characterWitness.codePointCase": {
@@ -203,6 +212,7 @@
             "Uppercase hex digits, e.g. U+25AB"
           ],
           "default": "upper",
+          "scope": "language-overridable",
           "description": "Whether hex digits (and the 'u+' prefix) are displayed in lower or uppercase."
         },
         "characterWitness.ignoredPaths": {
