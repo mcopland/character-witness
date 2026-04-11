@@ -1,4 +1,6 @@
 import * as assert from "assert";
+import * as fs from "fs";
+import * as path from "path";
 import * as vscode from "vscode";
 
 vi.mock("vscode", () => ({
@@ -38,6 +40,11 @@ vi.mock("vscode", () => ({
   },
   workspace: {
     getWorkspaceFolder: () => undefined,
+    getConfiguration: vi.fn(() => ({
+      get<T>(_key: string, defaultValue: T): T {
+        return defaultValue;
+      },
+    })),
   },
   window: {
     activeTextEditor: undefined as unknown,
@@ -842,4 +849,150 @@ describe("findNonAsciiCharacters", () => {
     const matches = findNonAsciiCharacters(doc, new Set());
     assert.strictEqual(matches.length, 0);
   });
+});
+
+// ---------------------------------------------------------------------------
+// getConfig per-resource caching (language-overridable settings)
+// ---------------------------------------------------------------------------
+
+describe("getConfig per-resource caching", () => {
+  let getConfigurationSpy: ReturnType<typeof vi.fn>;
+  let stores: Map<string, Map<string, unknown>>;
+
+  beforeEach(() => {
+    configModule.invalidateConfigCache();
+    stores = new Map();
+    stores.set("__global__", new Map());
+    getConfigurationSpy = vscode.workspace.getConfiguration as ReturnType<
+      typeof vi.fn
+    >;
+    getConfigurationSpy.mockImplementation(
+      (
+        _section: string,
+        resource?: { toString(): string } | null,
+      ): { get<T>(prop: string, defaultValue: T): T } => {
+        const key = resource ? resource.toString() : "__global__";
+        let store = stores.get(key);
+        if (!store) {
+          store = new Map();
+          stores.set(key, store);
+        }
+        const s = store;
+        return {
+          get<T>(prop: string, defaultValue: T): T {
+            return (s.has(prop) ? s.get(prop) : defaultValue) as T;
+          },
+        };
+      },
+    );
+  });
+
+  afterEach(() => {
+    configModule.invalidateConfigCache();
+    getConfigurationSpy.mockReset();
+    getConfigurationSpy.mockImplementation(() => ({
+      get<T>(_key: string, defaultValue: T): T {
+        return defaultValue;
+      },
+    }));
+  });
+
+  test("passes resource URI to vscode.workspace.getConfiguration", () => {
+    const uri = {
+      toString: () => "file:///foo.ts",
+    } as unknown as vscode.Uri;
+    configModule.getConfig(uri);
+    const calls = getConfigurationSpy.mock.calls;
+    assert.ok(calls.length > 0);
+    assert.strictEqual(calls[0][0], "characterWitness");
+    assert.strictEqual(calls[0][1], uri);
+  });
+
+  test("caches per resource and returns the cached entry on re-read", () => {
+    const a = {
+      toString: () => "file:///a.ts",
+    } as unknown as vscode.Uri;
+    const b = {
+      toString: () => "file:///b.ts",
+    } as unknown as vscode.Uri;
+    stores.set("file:///a.ts", new Map<string, unknown>([["enable", true]]));
+    stores.set("file:///b.ts", new Map<string, unknown>([["enable", false]]));
+
+    const ca = configModule.getConfig(a);
+    const cb = configModule.getConfig(b);
+    assert.strictEqual(ca.enable, true);
+    assert.strictEqual(cb.enable, false);
+
+    const callsBefore = getConfigurationSpy.mock.calls.length;
+    const caAgain = configModule.getConfig(a);
+    assert.strictEqual(caAgain, ca);
+    assert.strictEqual(getConfigurationSpy.mock.calls.length, callsBefore);
+  });
+
+  test("invalidateConfigCache clears all per-resource entries", () => {
+    const a = {
+      toString: () => "file:///a.ts",
+    } as unknown as vscode.Uri;
+    configModule.getConfig(a);
+    configModule.getConfig();
+    const callsBefore = getConfigurationSpy.mock.calls.length;
+    configModule.invalidateConfigCache();
+    configModule.getConfig(a);
+    configModule.getConfig();
+    assert.strictEqual(getConfigurationSpy.mock.calls.length, callsBefore + 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// package.json setting scopes
+// ---------------------------------------------------------------------------
+
+describe("package.json setting scopes", () => {
+  const LANGUAGE_OVERRIDABLE = [
+    "characterWitness.enable",
+    "characterWitness.allowedCharacters",
+    "characterWitness.autoReplaceOnSave",
+    "characterWitness.replacementMap",
+    "characterWitness.severityOverrides",
+    "characterWitness.includeStrings",
+    "characterWitness.includeComments",
+    "characterWitness.diagnosticSeverities",
+    "characterWitness.codePointFormat",
+    "characterWitness.codePointCase",
+  ];
+  const NOT_LANGUAGE_OVERRIDABLE = [
+    "characterWitness.decoration",
+    "characterWitness.ignoredPaths",
+  ];
+
+  let properties: Record<string, { scope?: string }>;
+
+  beforeAll(() => {
+    const pkgPath = path.resolve(__dirname, "..", "..", "package.json");
+    const raw = fs.readFileSync(pkgPath, "utf8");
+    const pkg = JSON.parse(raw) as {
+      contributes: {
+        configuration: {
+          properties: Record<string, { scope?: string }>;
+        };
+      };
+    };
+    properties = pkg.contributes.configuration.properties;
+  });
+
+  for (const key of LANGUAGE_OVERRIDABLE) {
+    test(`${key} is language-overridable`, () => {
+      const prop = properties[key];
+      assert.ok(prop, `expected ${key} to exist in package.json`);
+      assert.strictEqual(prop.scope, "language-overridable");
+    });
+  }
+
+  for (const key of NOT_LANGUAGE_OVERRIDABLE) {
+    test(`${key} is not language-overridable`, () => {
+      const prop = properties[key];
+      assert.ok(prop, `expected ${key} to exist in package.json`);
+      assert.notStrictEqual(prop.scope, "language-overridable");
+    });
+  }
 });
