@@ -2,6 +2,14 @@
  * Regex-based string/comment region detection per language.
  * Safety: all start/end values are UTF-16 code-unit offsets into the raw
  * text string, the same coordinate space used by document.positionAt().
+ *
+ * Known limitations (relevant when includeStrings/includeComments is false):
+ *   - Regex literals (/pattern/) in JS/TS may be misclassified as string regions.
+ *   - Python f-strings and raw strings (f"...", r"...") are treated as plain strings.
+ *   - Here-documents (shell, Ruby, PHP) are not detected; content is unfiltered.
+ *   - Deeply nested template literal interpolation (${`${...}`}) may not be fully
+ *     classified, leaving inner characters in the wrong region type.
+ * A full tokenizer rewrite would be needed to eliminate these edge cases.
  */
 
 export interface TextRegion {

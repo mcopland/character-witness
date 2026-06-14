@@ -164,13 +164,13 @@
           "type": "boolean",
           "default": true,
           "scope": "language-overridable",
-          "description": "Whether to flag non-ASCII characters inside string literals. When false, characters within strings are ignored."
+          "description": "Whether to flag non-ASCII characters inside string literals. When false, characters within strings are ignored. Note: detection is regex-based; regex literals (/pattern/), Python f-/raw-strings, and here-docs may not be classified correctly."
         },
         "characterWitness.includeComments": {
           "type": "boolean",
           "default": true,
           "scope": "language-overridable",
-          "description": "Whether to flag non-ASCII characters inside comments. When false, characters within comments are ignored."
+          "description": "Whether to flag non-ASCII characters inside comments. When false, characters within comments are ignored. Note: detection is regex-based; some language constructs may not be classified correctly."
         },
         "characterWitness.diagnosticSeverities": {
           "type": "array",

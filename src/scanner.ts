@@ -186,6 +186,11 @@ export function formatGroupedDiagnosticMessage(
   return `${matches.length} non-ASCII characters: [${parts.join(", ")}]`;
 }
 
+/**
+ * Build the markdown content shown in the hover tooltip for a single match.
+ * Includes the Unicode name (bold) and the character with its formatted code
+ * point in a code span.
+ */
 export function formatHoverMarkdown(
   match: NonAsciiMatch,
   format: string = "u+",
@@ -200,6 +205,12 @@ export function formatHoverMarkdown(
   return new vscode.MarkdownString(parts.join("  \n"));
 }
 
+/**
+ * Scan a document for non-ASCII characters (code point > 127) that are not in
+ * `allowedCharacters`. Returns one `NonAsciiMatch` per character, in document
+ * order. When `includeStrings` or `includeComments` is false, characters inside
+ * those region types are skipped (see `regions.ts` for known limitations).
+ */
 export function findNonAsciiCharacters(
   document: vscode.TextDocument,
   allowedCharacters: Set<string>,
@@ -425,7 +436,9 @@ export function applyIncrementalChange(
   const above = prevMatches.slice(0, firstAffectedIdx);
   const belowSrc = prevMatches.slice(firstAfterIdx);
   const below =
-    lineDelta === 0 ? belowSrc : belowSrc.map(m => shiftMatchLine(m, lineDelta));
+    lineDelta === 0
+      ? belowSrc
+      : belowSrc.map(m => shiftMatchLine(m, lineDelta));
 
   return [...above, ...newMatches, ...below];
 }
@@ -438,10 +451,7 @@ function shiftMatchLine(m: NonAsciiMatch, lineDelta: number): NonAsciiMatch {
         m.range.start.line + lineDelta,
         m.range.start.character,
       ),
-      new vscode.Position(
-        m.range.end.line + lineDelta,
-        m.range.end.character,
-      ),
+      new vscode.Position(m.range.end.line + lineDelta, m.range.end.character),
     ),
   };
 }

@@ -41,12 +41,12 @@ The extension activates on `onStartupFinished` and wires up VS Code events in `e
 
 7. **`commands.ts`**: Implements three commands: `goToNextNonAsciiCharacter` (cycles through matches in the active editor), `applyReplacementsNow` (applies configured replacements on demand), and `addToAllowedCharacters` (reads cursor position or selection to find non-ASCII chars, then writes to workspace settings).
 
-8. **`generated/unicode-names.ts`**: **Hand-written** (not generated). Exports `getCharacterName(codePoint)`. Lookup order: correction aliases -> control aliases -> Hangul algorithmic decomposition -> algorithmic ranges (CJK, Tangut, etc.) -> packed name table (lazy-loaded from `resources/unicode-names.txt` via `fs.readFileSync`).
+8. **`generated/unicode-names.ts`**: **Hand-written** (not generated). Exports `getCharacterName(codePoint)`. Lookup order: correction aliases -> control aliases -> algorithmic ranges (CJK, Tangut, etc.) -> packed name table (lazy-loaded from `resources/unicode-names.txt` via `fs.readFileSync`).
 
 ## Build Pipeline Details
 
 - `npm run generate` writes `resources/unicode-names.txt` (~38k `HHHH NAME` entries) from `@unicode/unicode-16.0.0`. This file is committed and packaged in the VSIX.
-- `src/generated/unicode-names.ts` is **hand-written** and must be updated manually when bumping the Unicode version (it contains the algorithmic ranges, Hangul tables, aliases, and the lazy-load logic for `unicode-names.txt`).
+- `src/generated/unicode-names.ts` is **hand-written** and must be updated manually when bumping the Unicode version (it contains the algorithmic ranges, aliases, and the lazy-load logic for `unicode-names.txt`).
 - TypeScript compiles to `out/` (ES2022, CommonJS, strict mode). The VSIX entry point is `./out/extension.js`.
 
 ## Testing
