@@ -32,6 +32,12 @@
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Auto-replace on save, the replacement map, and ignored-paths globs are disabled in untrusted workspaces. Detection, highlighting, and diagnostics continue to work."
+    }
+  },
   "contributes": {
     "commands": [
       {
@@ -232,6 +238,12 @@
               "**/*.generated.ts"
             ]
           ]
+        },
+        "characterWitness.maxFileSizeKb": {
+          "type": "integer",
+          "default": 10240,
+          "minimum": 0,
+          "description": "Maximum document size (in KB, measured in UTF-16 code units) to scan and auto-replace. Files larger than this are skipped to protect responsiveness on large inputs. Set to 0 to disable the limit."
         }
       }
     }
@@ -263,5 +275,8 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1",
     "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "minimatch": "^10.2.5"
   }
 }

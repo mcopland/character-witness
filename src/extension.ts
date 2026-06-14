@@ -1,3 +1,4 @@
+import { Minimatch } from "minimatch";
 import * as vscode from "vscode";
 import { buildReplacementEdits } from "./autoreplace";
 import {
@@ -6,6 +7,7 @@ import {
   goToNextNonAsciiCharacter,
 } from "./commands";
 import {
+  ExtensionConfig,
   getCharacterSeverity,
   getConfig,
   invalidateConfigCache,
@@ -18,6 +20,8 @@ import {
 } from "./decoration";
 import { handleError, initOutputChannel, log, logError } from "./logger";
 import {
+  applyIncrementalChange,
+  findMatchAtPosition,
   findNonAsciiCharacters,
   formatGroupedDiagnosticMessage,
   formatHoverMarkdown,
@@ -28,6 +32,8 @@ let diagnosticCollection: vscode.DiagnosticCollection;
 let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 const DEBOUNCE_MS = 250;
+const SCAN_CACHE_CAP = 50;
+const INCREMENTAL_THRESHOLD_LINES = 5000;
 
 interface ScanCacheEntry {
   version: number;
@@ -37,9 +43,19 @@ interface ScanCacheEntry {
 
 const scanCache = new Map<string, ScanCacheEntry>();
 
+function touchCacheEntry(key: string, entry: ScanCacheEntry): void {
+  // Map preserves insertion order; delete + set moves to MRU position.
+  scanCache.delete(key);
+  scanCache.set(key, entry);
+  if (scanCache.size > SCAN_CACHE_CAP) {
+    const oldest = scanCache.keys().next().value;
+    if (oldest !== undefined) scanCache.delete(oldest);
+  }
+}
+
 export function isIgnoredDocument(
   document: { uri: vscode.Uri },
-  ignoredPaths: RegExp[],
+  ignoredPaths: Minimatch[],
 ): boolean {
   const normalized = document.uri.fsPath.replace(/\\/g, "/");
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
@@ -48,17 +64,22 @@ export function isIgnoredDocument(
         workspaceFolder.uri.fsPath.replace(/\\/g, "/").length + 1,
       )
     : normalized;
-  return ignoredPaths.some(re => re.test(testPath));
+  return ignoredPaths.some(m => m.match(testPath));
+}
+
+function computeFingerprint(
+  document: vscode.TextDocument,
+  config: ExtensionConfig,
+): string {
+  return `${config.allowedCharactersKey}|${config.includeStrings}|${config.includeComments}|${document.languageId}|${config.maxFileSizeBytes}`;
 }
 
 function getCachedMatches(
   document: vscode.TextDocument,
-  allowedCharacters: Set<string>,
-  includeStrings: boolean = true,
-  includeComments: boolean = true,
+  config: ExtensionConfig,
 ): NonAsciiMatch[] {
   const key = document.uri.toString();
-  const fingerprint = `${[...allowedCharacters].sort().join(",")}|${includeStrings}|${includeComments}|${document.languageId}`;
+  const fingerprint = computeFingerprint(document, config);
   const cached = scanCache.get(key);
 
   if (
@@ -66,18 +87,63 @@ function getCachedMatches(
     cached.version === document.version &&
     cached.fingerprint === fingerprint
   ) {
+    touchCacheEntry(key, cached);
     return cached.matches;
   }
 
   const matches = findNonAsciiCharacters(
     document,
-    allowedCharacters,
-    includeStrings,
-    includeComments,
+    config.allowedCharacters,
+    config.includeStrings,
+    config.includeComments,
     document.languageId,
+    config.maxFileSizeBytes,
   );
-  scanCache.set(key, { version: document.version, fingerprint, matches });
+  touchCacheEntry(key, { version: document.version, fingerprint, matches });
   return matches;
+}
+
+function canIncrementalUpdate(
+  document: vscode.TextDocument,
+  config: ExtensionConfig,
+): boolean {
+  if (document.lineCount < INCREMENTAL_THRESHOLD_LINES) return false;
+  if (!config.includeStrings || !config.includeComments) return false;
+  if (document.getText().length > config.maxFileSizeBytes) return false;
+  return true;
+}
+
+function tryIncrementalUpdate(
+  event: vscode.TextDocumentChangeEvent,
+  config: ExtensionConfig,
+): boolean {
+  if (!canIncrementalUpdate(event.document, config)) return false;
+  if (event.contentChanges.length === 0) return false;
+
+  const key = event.document.uri.toString();
+  const cached = scanCache.get(key);
+  if (!cached) return false;
+
+  const fingerprint = computeFingerprint(event.document, config);
+  if (cached.fingerprint !== fingerprint) return false;
+  if (cached.version !== event.document.version - 1) return false;
+
+  let matches = cached.matches;
+  for (const change of event.contentChanges) {
+    matches = applyIncrementalChange(
+      matches,
+      event.document,
+      change,
+      config.allowedCharacters,
+    );
+  }
+
+  touchCacheEntry(key, {
+    version: event.document.version,
+    fingerprint,
+    matches,
+  });
+  return true;
 }
 
 function updateEditor(editor: vscode.TextEditor): void {
@@ -94,14 +160,15 @@ function updateEditor(editor: vscode.TextEditor): void {
       return;
     }
 
-    const matches = getCachedMatches(
-      editor.document,
-      config.allowedCharacters,
-      config.includeStrings,
-      config.includeComments,
-    );
+    const matches = getCachedMatches(editor.document, config);
 
     const decType = ensureDecorationType();
+    if (matches.length === 0) {
+      editor.setDecorations(decType, []);
+      diagnosticCollection.set(editor.document.uri, []);
+      return;
+    }
+
     editor.setDecorations(
       decType,
       matches.map(m => ({ range: m.range })),
@@ -210,6 +277,8 @@ export function activate(context: vscode.ExtensionContext): void {
       try {
         const editor = vscode.window.activeTextEditor;
         if (editor && event.document === editor.document) {
+          const config = getConfig();
+          tryIncrementalUpdate(event, config);
           scheduleUpdate(editor);
         }
       } catch (err) {
@@ -237,11 +306,34 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      try {
+        invalidateConfigCache();
+        scanCache.clear();
+        log("workspace trust granted; full functionality restored");
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+          updateEditor(editor);
+        }
+      } catch (err) {
+        handleError("onDidGrantWorkspaceTrust", err);
+      }
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.workspace.onWillSaveTextDocument(event => {
       try {
         const config = getConfig(event.document.uri);
         if (!config.enable) return;
         if (isIgnoredDocument(event.document, config.ignoredPaths)) return;
+        const textLen = event.document.getText().length;
+        if (textLen > config.maxFileSizeBytes) {
+          log(
+            `skipping auto-replace: ${event.document.uri.fsPath} exceeds maxFileSizeKb (${textLen} > ${config.maxFileSizeBytes})`,
+          );
+          return;
+        }
         event.waitUntil(
           Promise.resolve(
             buildReplacementEdits(event.document, getCachedMatches),
@@ -262,17 +354,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.languages.registerHoverProvider(
-      { scheme: "*" },
+      [{ scheme: "file" }, { scheme: "untitled" }],
       {
         provideHover(document, position) {
-          const config = getConfig(document.uri);
-          const matches = getCachedMatches(
-            document,
-            config.allowedCharacters,
-            config.includeStrings,
-            config.includeComments,
-          );
-          const match = matches.find(m => m.range.contains(position));
+          const config = getConfig();
+          const matches = getCachedMatches(document, config);
+          const match = findMatchAtPosition(matches, position);
           if (!match) return undefined;
           return new vscode.Hover(
             formatHoverMarkdown(
@@ -289,6 +376,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   if (vscode.window.activeTextEditor) {
     updateEditor(vscode.window.activeTextEditor);
+  }
+
+  if (!vscode.workspace.isTrusted) {
+    log(
+      "limited mode: workspace is not trusted; auto-replace, replacementMap, and ignoredPaths are disabled",
+    );
   }
 
   log("activated");

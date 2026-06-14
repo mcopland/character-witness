@@ -4,6 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import { buildReplacementEdits } from "../autoreplace";
+import { ExtensionConfig } from "../config";
 import {
   findNonAsciiCharacters,
   formatGroupedDiagnosticMessage,
@@ -232,8 +233,8 @@ test("Auto-Replace | buildReplacementEdits should produce edits for mapped chara
   const { document } = await openDocumentWithContent("hello \u2014 world");
 
   // Direct scan to get matches (bypass cache for isolated test)
-  const getCachedFn = (doc: vscode.TextDocument, allowedSet: Set<string>) =>
-    findNonAsciiCharacters(doc, allowedSet);
+  const getCachedFn = (doc: vscode.TextDocument, cfg: ExtensionConfig) =>
+    findNonAsciiCharacters(doc, cfg.allowedCharacters);
 
   await withConfig(
     { autoReplaceOnSave: true, replacementMap: { "u+2014": "-" } },
@@ -254,8 +255,8 @@ test("Auto-Replace | buildReplacementEdits should produce edits for mapped chara
 
 test("Auto-Replace | No edits when autoReplaceOnSave is false", async () => {
   const { document } = await openDocumentWithContent("hello \u2014 world");
-  const getCachedFn = (doc: vscode.TextDocument, allowedSet: Set<string>) =>
-    findNonAsciiCharacters(doc, allowedSet);
+  const getCachedFn = (doc: vscode.TextDocument, cfg: ExtensionConfig) =>
+    findNonAsciiCharacters(doc, cfg.allowedCharacters);
 
   await withConfig({ autoReplaceOnSave: false }, async () => {
     const edits = buildReplacementEdits(document, getCachedFn);
@@ -270,8 +271,8 @@ test("Auto-Replace | No edits when autoReplaceOnSave is false", async () => {
 test("Auto-Replace | Characters not in replacementMap produce no edits", async () => {
   // u+2019 (right single quote) is not in default replacement map
   const { document } = await openDocumentWithContent("hello \u2019 world");
-  const getCachedFn = (doc: vscode.TextDocument, allowedSet: Set<string>) =>
-    findNonAsciiCharacters(doc, allowedSet);
+  const getCachedFn = (doc: vscode.TextDocument, cfg: ExtensionConfig) =>
+    findNonAsciiCharacters(doc, cfg.allowedCharacters);
 
   await withConfig(
     { autoReplaceOnSave: true, replacementMap: { "u+2013": "-" } },

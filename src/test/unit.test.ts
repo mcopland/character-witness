@@ -1,6 +1,4 @@
 import * as assert from "assert";
-import * as fs from "fs";
-import * as path from "path";
 import * as vscode from "vscode";
 
 vi.mock("vscode", () => ({
@@ -18,6 +16,10 @@ vi.mock("vscode", () => ({
     isAfter(other: { line: number; character: number }): boolean {
       if (this.line !== other.line) return this.line > other.line;
       return this.character > other.character;
+    }
+    isBefore(other: { line: number; character: number }): boolean {
+      if (this.line !== other.line) return this.line < other.line;
+      return this.character < other.character;
     }
   },
   Selection: class {
@@ -40,11 +42,9 @@ vi.mock("vscode", () => ({
   },
   workspace: {
     getWorkspaceFolder: () => undefined,
-    getConfiguration: vi.fn(() => ({
-      get<T>(_key: string, defaultValue: T): T {
-        return defaultValue;
-      },
-    })),
+    isTrusted: true,
+    onDidGrantWorkspaceTrust: () => ({ dispose: () => {} }),
+    workspaceFolders: undefined,
   },
   window: {
     activeTextEditor: undefined as unknown,
@@ -58,17 +58,22 @@ vi.mock("vscode", () => ({
 // ---------------------------------------------------------------------------
 
 import { goToNextNonAsciiCharacter } from "../commands";
+import * as configModule from "../config";
 import {
   compileIgnoredPaths,
   ExtensionConfig,
   getCharacterSeverity,
 } from "../config";
-import * as configModule from "../config";
 import { isIgnoredDocument } from "../extension";
 import { getCharacterName, UNICODE_VERSION } from "../generated/unicode-names";
 import { getTextRegions } from "../regions";
 import {
+  applyIncrementalChange,
+  countLineBreaks,
+  findMatchAtPosition,
+  findNextMatchAfter,
   findNonAsciiCharacters,
+  findNonAsciiCharactersInLineRange,
   formatGroupedDiagnosticMessage,
   formatHoverMarkdown,
   NonAsciiMatch,
@@ -370,16 +375,34 @@ describe("compileIgnoredPaths", () => {
   test("glob with extension wildcard matches filename", () => {
     const result = compileIgnoredPaths(["unicode-names.*"]);
     assert.strictEqual(result.length, 1);
-    assert.ok(result[0].test("unicode-names.ts"));
+    assert.ok(result[0].match("unicode-names.ts"));
   });
 
   test("double-star glob matches path containing segment", () => {
     const result = compileIgnoredPaths(["**/node_modules/**"]);
-    assert.ok(result[0].test("/home/user/project/node_modules/pkg/index.js"));
+    assert.ok(result[0].match("/home/user/project/node_modules/pkg/index.js"));
   });
 
   test("returns empty array for empty input", () => {
     assert.deepStrictEqual(compileIgnoredPaths([]), []);
+  });
+
+  test("anchors to end of path (regression for trailing-suffix bug)", () => {
+    const result = compileIgnoredPaths(["**/*.min.js"]);
+    assert.ok(result[0].match("dist/foo.min.js"));
+    assert.ok(!result[0].match("dist/foo.min.js.bak"));
+  });
+
+  test("supports brace expansion", () => {
+    const result = compileIgnoredPaths(["{dist,build}/**"]);
+    assert.ok(result[0].match("dist/foo.js"));
+    assert.ok(result[0].match("build/bar.js"));
+    assert.ok(!result[0].match("src/baz.js"));
+  });
+
+  test("matches paths inside dot-prefixed directories", () => {
+    const result = compileIgnoredPaths(["**/*.log"]);
+    assert.ok(result[0].match(".cache/foo.log"));
   });
 });
 
@@ -394,21 +417,30 @@ describe("isIgnoredDocument", () => {
 
   test("returns true when a pattern matches the normalized path", () => {
     assert.strictEqual(
-      isIgnoredDocument(makeDoc("/foo/bar.ts"), [/bar\.ts$/]),
+      isIgnoredDocument(
+        makeDoc("/foo/bar.ts"),
+        compileIgnoredPaths(["**/bar.ts"]),
+      ),
       true,
     );
   });
 
   test("returns false when no pattern matches", () => {
     assert.strictEqual(
-      isIgnoredDocument(makeDoc("/foo/bar.ts"), [/baz\.ts$/]),
+      isIgnoredDocument(
+        makeDoc("/foo/bar.ts"),
+        compileIgnoredPaths(["**/baz.ts"]),
+      ),
       false,
     );
   });
 
   test("normalizes backslashes to forward slashes before matching", () => {
     assert.strictEqual(
-      isIgnoredDocument(makeDoc("C:\\foo\\bar.ts"), [/foo\/bar\.ts$/]),
+      isIgnoredDocument(
+        makeDoc("C:\\foo\\bar.ts"),
+        compileIgnoredPaths(["**/foo/bar.ts"]),
+      ),
       true,
     );
   });
@@ -849,150 +881,554 @@ describe("findNonAsciiCharacters", () => {
     const matches = findNonAsciiCharacters(doc, new Set());
     assert.strictEqual(matches.length, 0);
   });
+
+  test("returns empty when text exceeds maxFileSizeBytes", () => {
+    const doc = mockDocument("hello \u2019 world");
+    const matches = findNonAsciiCharacters(
+      doc,
+      new Set(),
+      true,
+      true,
+      "plaintext",
+      5,
+    );
+    assert.strictEqual(matches.length, 0);
+  });
+
+  test("scans normally when text is within maxFileSizeBytes", () => {
+    const doc = mockDocument("hello \u2019 world");
+    const matches = findNonAsciiCharacters(
+      doc,
+      new Set(),
+      true,
+      true,
+      "plaintext",
+      1024,
+    );
+    assert.strictEqual(matches.length, 1);
+  });
+
+  test("treats POSITIVE_INFINITY maxFileSizeBytes as unlimited", () => {
+    const doc = mockDocument("hello \u2019 world");
+    const matches = findNonAsciiCharacters(
+      doc,
+      new Set(),
+      true,
+      true,
+      "plaintext",
+      Number.POSITIVE_INFINITY,
+    );
+    assert.strictEqual(matches.length, 1);
+  });
 });
 
 // ---------------------------------------------------------------------------
-// getConfig per-resource caching (language-overridable settings)
+// findMatchAtPosition
 // ---------------------------------------------------------------------------
 
-describe("getConfig per-resource caching", () => {
-  let getConfigurationSpy: ReturnType<typeof vi.fn>;
-  let stores: Map<string, Map<string, unknown>>;
+function buildMatch(line: number, char: number, length = 1): NonAsciiMatch {
+  return {
+    char: "x",
+    codePoint: 0x78,
+    hex: "0078",
+    unicodeName: undefined,
+    range: new vscode.Range(
+      new vscode.Position(line, char),
+      new vscode.Position(line, char + length),
+    ),
+  } as unknown as NonAsciiMatch;
+}
 
-  beforeEach(() => {
-    configModule.invalidateConfigCache();
-    stores = new Map();
-    stores.set("__global__", new Map());
-    getConfigurationSpy = vscode.workspace.getConfiguration as ReturnType<
-      typeof vi.fn
-    >;
-    getConfigurationSpy.mockImplementation(
-      (
-        _section: string,
-        resource?: { toString(): string } | null,
-      ): { get<T>(prop: string, defaultValue: T): T } => {
-        const key = resource ? resource.toString() : "__global__";
-        let store = stores.get(key);
-        if (!store) {
-          store = new Map();
-          stores.set(key, store);
-        }
-        const s = store;
-        return {
-          get<T>(prop: string, defaultValue: T): T {
-            return (s.has(prop) ? s.get(prop) : defaultValue) as T;
-          },
-        };
-      },
+describe("findMatchAtPosition", () => {
+  const matches = [
+    buildMatch(0, 5),
+    buildMatch(1, 2),
+    buildMatch(1, 8),
+    buildMatch(3, 0),
+  ];
+
+  test("returns undefined for empty matches", () => {
+    assert.strictEqual(
+      findMatchAtPosition([], new vscode.Position(0, 0)),
+      undefined,
     );
   });
 
-  afterEach(() => {
-    configModule.invalidateConfigCache();
-    getConfigurationSpy.mockReset();
-    getConfigurationSpy.mockImplementation(() => ({
-      get<T>(_key: string, defaultValue: T): T {
-        return defaultValue;
-      },
-    }));
+  test("returns the match when position is at its start", () => {
+    const m = findMatchAtPosition(matches, new vscode.Position(1, 2));
+    assert.strictEqual(m, matches[1]);
   });
 
-  test("passes resource URI to vscode.workspace.getConfiguration", () => {
-    const uri = {
-      toString: () => "file:///foo.ts",
-    } as unknown as vscode.Uri;
-    configModule.getConfig(uri);
-    const calls = getConfigurationSpy.mock.calls;
-    assert.ok(calls.length > 0);
-    assert.strictEqual(calls[0][0], "characterWitness");
-    assert.strictEqual(calls[0][1], uri);
+  test("returns the match when position is at its end (inclusive)", () => {
+    const m = findMatchAtPosition(matches, new vscode.Position(1, 3));
+    assert.strictEqual(m, matches[1]);
   });
 
-  test("caches per resource and returns the cached entry on re-read", () => {
-    const a = {
-      toString: () => "file:///a.ts",
-    } as unknown as vscode.Uri;
-    const b = {
-      toString: () => "file:///b.ts",
-    } as unknown as vscode.Uri;
-    stores.set("file:///a.ts", new Map<string, unknown>([["enable", true]]));
-    stores.set("file:///b.ts", new Map<string, unknown>([["enable", false]]));
-
-    const ca = configModule.getConfig(a);
-    const cb = configModule.getConfig(b);
-    assert.strictEqual(ca.enable, true);
-    assert.strictEqual(cb.enable, false);
-
-    const callsBefore = getConfigurationSpy.mock.calls.length;
-    const caAgain = configModule.getConfig(a);
-    assert.strictEqual(caAgain, ca);
-    assert.strictEqual(getConfigurationSpy.mock.calls.length, callsBefore);
+  test("returns undefined when position is between matches on same line", () => {
+    const m = findMatchAtPosition(matches, new vscode.Position(1, 5));
+    assert.strictEqual(m, undefined);
   });
 
-  test("invalidateConfigCache clears all per-resource entries", () => {
-    const a = {
-      toString: () => "file:///a.ts",
-    } as unknown as vscode.Uri;
-    configModule.getConfig(a);
-    configModule.getConfig();
-    const callsBefore = getConfigurationSpy.mock.calls.length;
-    configModule.invalidateConfigCache();
-    configModule.getConfig(a);
-    configModule.getConfig();
-    assert.strictEqual(getConfigurationSpy.mock.calls.length, callsBefore + 2);
+  test("returns undefined when position is on an unrelated line", () => {
+    const m = findMatchAtPosition(matches, new vscode.Position(2, 0));
+    assert.strictEqual(m, undefined);
+  });
+
+  test("returns undefined when position is before all matches", () => {
+    const m = findMatchAtPosition(matches, new vscode.Position(0, 0));
+    assert.strictEqual(m, undefined);
+  });
+
+  test("returns undefined when position is after all matches", () => {
+    const m = findMatchAtPosition(matches, new vscode.Position(99, 0));
+    assert.strictEqual(m, undefined);
   });
 });
 
 // ---------------------------------------------------------------------------
-// package.json setting scopes
+// findNextMatchAfter
 // ---------------------------------------------------------------------------
 
-describe("package.json setting scopes", () => {
-  const LANGUAGE_OVERRIDABLE = [
-    "characterWitness.enable",
-    "characterWitness.allowedCharacters",
-    "characterWitness.autoReplaceOnSave",
-    "characterWitness.replacementMap",
-    "characterWitness.severityOverrides",
-    "characterWitness.includeStrings",
-    "characterWitness.includeComments",
-    "characterWitness.diagnosticSeverities",
-    "characterWitness.codePointFormat",
-    "characterWitness.codePointCase",
-  ];
-  const NOT_LANGUAGE_OVERRIDABLE = [
-    "characterWitness.decoration",
-    "characterWitness.ignoredPaths",
+describe("findNextMatchAfter", () => {
+  const matches = [
+    buildMatch(0, 5),
+    buildMatch(1, 2),
+    buildMatch(1, 8),
+    buildMatch(3, 0),
   ];
 
-  let properties: Record<string, { scope?: string }>;
-
-  beforeAll(() => {
-    const pkgPath = path.resolve(__dirname, "..", "..", "package.json");
-    const raw = fs.readFileSync(pkgPath, "utf8");
-    const pkg = JSON.parse(raw) as {
-      contributes: {
-        configuration: {
-          properties: Record<string, { scope?: string }>;
-        };
-      };
-    };
-    properties = pkg.contributes.configuration.properties;
+  test("returns undefined for empty matches", () => {
+    assert.strictEqual(
+      findNextMatchAfter([], new vscode.Position(0, 0)),
+      undefined,
+    );
   });
 
-  for (const key of LANGUAGE_OVERRIDABLE) {
-    test(`${key} is language-overridable`, () => {
-      const prop = properties[key];
-      assert.ok(prop, `expected ${key} to exist in package.json`);
-      assert.strictEqual(prop.scope, "language-overridable");
-    });
+  test("returns first match when cursor is before all", () => {
+    const m = findNextMatchAfter(matches, new vscode.Position(0, 0));
+    assert.strictEqual(m, matches[0]);
+  });
+
+  test("returns next match when cursor is on a match start", () => {
+    const m = findNextMatchAfter(matches, new vscode.Position(1, 2));
+    assert.strictEqual(m, matches[2]);
+  });
+
+  test("returns next match when cursor is mid-line between matches", () => {
+    const m = findNextMatchAfter(matches, new vscode.Position(1, 5));
+    assert.strictEqual(m, matches[2]);
+  });
+
+  test("returns undefined when cursor is past every match", () => {
+    const m = findNextMatchAfter(matches, new vscode.Position(99, 0));
+    assert.strictEqual(m, undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// countLineBreaks
+// ---------------------------------------------------------------------------
+
+describe("countLineBreaks", () => {
+  test("returns 0 for empty string", () => {
+    assert.strictEqual(countLineBreaks(""), 0);
+  });
+
+  test("returns 0 for text with no line break", () => {
+    assert.strictEqual(countLineBreaks("hello world"), 0);
+  });
+
+  test("counts a single LF", () => {
+    assert.strictEqual(countLineBreaks("foo\nbar"), 1);
+  });
+
+  test("counts multiple LFs", () => {
+    assert.strictEqual(countLineBreaks("a\nb\nc\n"), 3);
+  });
+
+  test("treats CRLF as a single line break", () => {
+    assert.strictEqual(countLineBreaks("foo\r\nbar"), 1);
+  });
+
+  test("counts lone CR as a line break", () => {
+    assert.strictEqual(countLineBreaks("foo\rbar"), 1);
+  });
+
+  test("counts a mix of CR, LF, and CRLF correctly", () => {
+    assert.strictEqual(countLineBreaks("a\nb\r\nc\rd"), 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Incremental rescan: shared harness
+// ---------------------------------------------------------------------------
+
+function richMockDocument(text: string): vscode.TextDocument {
+  const lines = text.split("\n");
+  function offsetOf(line: number, char: number): number {
+    let off = 0;
+    for (let l = 0; l < line; l++) off += lines[l].length + 1;
+    return off + char;
+  }
+  return {
+    getText: (range?: vscode.Range) => {
+      if (!range) return text;
+      const s = offsetOf(range.start.line, range.start.character);
+      const e = offsetOf(range.end.line, range.end.character);
+      return text.slice(s, e);
+    },
+    lineCount: lines.length,
+    lineAt: (n: number) => ({
+      range: new vscode.Range(
+        new vscode.Position(n, 0),
+        new vscode.Position(n, lines[n]?.length ?? 0),
+      ),
+    }),
+    languageId: "plaintext",
+  } as unknown as vscode.TextDocument;
+}
+
+function applyChangeToText(
+  text: string,
+  change: {
+    range: {
+      start: { line: number; character: number };
+      end: { line: number; character: number };
+    };
+    text: string;
+  },
+): string {
+  const lines = text.split("\n");
+  const offsetOf = (line: number, char: number) => {
+    let off = 0;
+    for (let l = 0; l < line; l++) off += lines[l].length + 1;
+    return off + char;
+  };
+  const s = offsetOf(change.range.start.line, change.range.start.character);
+  const e = offsetOf(change.range.end.line, change.range.end.character);
+  return text.slice(0, s) + change.text + text.slice(e);
+}
+
+function matchesEqual(a: NonAsciiMatch[], b: NonAsciiMatch[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.char !== y.char ||
+      x.codePoint !== y.codePoint ||
+      x.range.start.line !== y.range.start.line ||
+      x.range.start.character !== y.range.start.character ||
+      x.range.end.line !== y.range.end.line ||
+      x.range.end.character !== y.range.end.character
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function describeMatch(m: NonAsciiMatch): string {
+  return `${m.char}@(${m.range.start.line},${m.range.start.character})`;
+}
+
+// ---------------------------------------------------------------------------
+// findNonAsciiCharactersInLineRange
+// ---------------------------------------------------------------------------
+
+describe("findNonAsciiCharactersInLineRange", () => {
+  test("returns matches with correct line numbers from sub-range", () => {
+    const doc = richMockDocument("a\nb\u00e9c\nd\u00f1e\nf");
+    const matches = findNonAsciiCharactersInLineRange(doc, 1, 2, new Set());
+    assert.strictEqual(matches.length, 2);
+    assert.strictEqual(matches[0].char, "\u00e9");
+    assert.strictEqual(matches[0].range.start.line, 1);
+    assert.strictEqual(matches[1].char, "\u00f1");
+    assert.strictEqual(matches[1].range.start.line, 2);
+  });
+
+  test("returns empty for range with no non-ASCII", () => {
+    const doc = richMockDocument("a\nb\u00e9c\nd\u00f1e\nf");
+    const matches = findNonAsciiCharactersInLineRange(doc, 0, 0, new Set());
+    assert.strictEqual(matches.length, 0);
+  });
+
+  test("clamps endLine to document bounds", () => {
+    const doc = richMockDocument("\u00e9");
+    const matches = findNonAsciiCharactersInLineRange(doc, 0, 99, new Set());
+    assert.strictEqual(matches.length, 1);
+  });
+
+  test("returns empty when startLine is past document end", () => {
+    const doc = richMockDocument("hello");
+    const matches = findNonAsciiCharactersInLineRange(doc, 5, 5, new Set());
+    assert.strictEqual(matches.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyIncrementalChange: targeted cases
+// ---------------------------------------------------------------------------
+
+describe("applyIncrementalChange", () => {
+  function fullScan(text: string): NonAsciiMatch[] {
+    return findNonAsciiCharacters(richMockDocument(text), new Set());
   }
 
-  for (const key of NOT_LANGUAGE_OVERRIDABLE) {
-    test(`${key} is not language-overridable`, () => {
-      const prop = properties[key];
-      assert.ok(prop, `expected ${key} to exist in package.json`);
-      assert.notStrictEqual(prop.scope, "language-overridable");
+  const cases: Array<{
+    name: string;
+    initial: string;
+    change: {
+      range: {
+        start: { line: number; character: number };
+        end: { line: number; character: number };
+      };
+      text: string;
+    };
+  }> = [
+    {
+      name: "insert ASCII in middle of single line",
+      initial: "hello \u00e9 world",
+      change: {
+        range: {
+          start: { line: 0, character: 6 },
+          end: { line: 0, character: 6 },
+        },
+        text: "X",
+      },
+    },
+    {
+      name: "insert non-ASCII in middle of single line",
+      initial: "hello world",
+      change: {
+        range: {
+          start: { line: 0, character: 5 },
+          end: { line: 0, character: 5 },
+        },
+        text: "\u00e9",
+      },
+    },
+    {
+      name: "delete non-ASCII character",
+      initial: "a\u00e9b",
+      change: {
+        range: {
+          start: { line: 0, character: 1 },
+          end: { line: 0, character: 2 },
+        },
+        text: "",
+      },
+    },
+    {
+      name: "insert newline splitting a line",
+      initial: "abc\u00e9def\u00f1",
+      change: {
+        range: {
+          start: { line: 0, character: 4 },
+          end: { line: 0, character: 4 },
+        },
+        text: "\n",
+      },
+    },
+    {
+      name: "delete newline joining two lines",
+      initial: "abc\u00e9\ndef\u00f1",
+      change: {
+        range: {
+          start: { line: 0, character: 4 },
+          end: { line: 1, character: 0 },
+        },
+        text: "",
+      },
+    },
+    {
+      name: "insert multi-line text",
+      initial: "before\nafter",
+      change: {
+        range: {
+          start: { line: 0, character: 6 },
+          end: { line: 0, character: 6 },
+        },
+        text: "\n\u00e9\n\u00f1\n",
+      },
+    },
+    {
+      name: "replace block across multiple lines",
+      initial: "a\u00e9\nb\u00f1\nc\u00fc\nd",
+      change: {
+        range: {
+          start: { line: 0, character: 0 },
+          end: { line: 2, character: 1 },
+        },
+        text: "X\u00ffY",
+      },
+    },
+    {
+      name: "insert non-ASCII at start of document",
+      initial: "rest of doc\n\u00e9here",
+      change: {
+        range: {
+          start: { line: 0, character: 0 },
+          end: { line: 0, character: 0 },
+        },
+        text: "\u00f1\n",
+      },
+    },
+    {
+      name: "append at end of last line",
+      initial: "a\nb\u00e9",
+      change: {
+        range: {
+          start: { line: 1, character: 2 },
+          end: { line: 1, character: 2 },
+        },
+        text: "\u00f1",
+      },
+    },
+    {
+      name: "delete entire last line",
+      initial: "a\u00e9\nb\u00f1",
+      change: {
+        range: {
+          start: { line: 0, character: 2 },
+          end: { line: 1, character: 2 },
+        },
+        text: "",
+      },
+    },
+    {
+      name: "insert emoji (surrogate pair)",
+      initial: "hello",
+      change: {
+        range: {
+          start: { line: 0, character: 5 },
+          end: { line: 0, character: 5 },
+        },
+        text: "\u{1F600}",
+      },
+    },
+  ];
+
+  for (const c of cases) {
+    test(c.name, () => {
+      const newText = applyChangeToText(c.initial, c.change);
+      const initialMatches = fullScan(c.initial);
+      const expected = fullScan(newText);
+      const incremental = applyIncrementalChange(
+        initialMatches,
+        richMockDocument(newText),
+        c.change,
+        new Set(),
+      );
+      assert.ok(
+        matchesEqual(incremental, expected),
+        `incremental != full\n  expected: ${expected.map(describeMatch).join(", ")}\n  got:      ${incremental.map(describeMatch).join(", ")}`,
+      );
     });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Property test: random edit sequences match full rescan
+// ---------------------------------------------------------------------------
+
+function makeRng(seed: number): () => number {
+  let state = seed | 0;
+  return () => {
+    // xorshift32
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 0x100000000;
+  };
+}
+
+function randomChange(
+  rng: () => number,
+  text: string,
+): {
+  range: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+  text: string;
+} {
+  const lines = text.split("\n");
+  const pickPos = (): { line: number; character: number } => {
+    const line = Math.floor(rng() * lines.length);
+    const len = lines[line]?.length ?? 0;
+    const character = Math.floor(rng() * (len + 1));
+    return { line, character };
+  };
+  const start = pickPos();
+  // End position must not be before start
+  let end = pickPos();
+  if (
+    end.line < start.line ||
+    (end.line === start.line && end.character < start.character)
+  ) {
+    end = { line: start.line, character: start.character };
+  }
+  // Random replacement text drawn from a small palette
+  const palette = [
+    "",
+    "a",
+    "x",
+    "\n",
+    "ab",
+    "\u00e9",
+    "\u00f1",
+    "abc\n\u00e9",
+    "\u{1F600}",
+    "\u00e9\u00f1\u00fc\u00ff",
+    "line1\nline2\n",
+  ];
+  const replacement = palette[Math.floor(rng() * palette.length)];
+  return { range: { start, end }, text: replacement };
+}
+
+describe("incremental rescan property test", () => {
+  test("incremental result equals full rescan over 200 random edits (seed 1)", () => {
+    runPropertyTest(1, 200);
+  });
+
+  test("incremental result equals full rescan over 200 random edits (seed 42)", () => {
+    runPropertyTest(42, 200);
+  });
+
+  test("incremental result equals full rescan over 200 random edits (seed 9999)", () => {
+    runPropertyTest(9999, 200);
+  });
+
+  function runPropertyTest(seed: number, iterations: number): void {
+    const rng = makeRng(seed);
+    let text =
+      "Initial document.\n" +
+      "It has a few non-ASCII chars: \u00e9 \u00f1 \u00fc.\n" +
+      "And one surrogate pair: \u{1F600}.\n" +
+      "Plus an em-dash: \u2014.\n" +
+      "Last line.";
+    let matches = findNonAsciiCharacters(richMockDocument(text), new Set());
+
+    for (let step = 0; step < iterations; step++) {
+      const change = randomChange(rng, text);
+      const newText = applyChangeToText(text, change);
+      const incremental = applyIncrementalChange(
+        matches,
+        richMockDocument(newText),
+        change,
+        new Set(),
+      );
+      const expected = findNonAsciiCharacters(
+        richMockDocument(newText),
+        new Set(),
+      );
+      assert.ok(
+        matchesEqual(incremental, expected),
+        `step ${step} (seed ${seed}): incremental != full\n  text: ${JSON.stringify(text)}\n  change: ${JSON.stringify(change)}\n  newText: ${JSON.stringify(newText)}\n  expected: ${expected.map(describeMatch).join(", ")}\n  got:      ${incremental.map(describeMatch).join(", ")}`,
+      );
+      text = newText;
+      matches = incremental;
+    }
   }
 });

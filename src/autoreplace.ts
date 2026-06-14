@@ -1,26 +1,19 @@
 import * as vscode from "vscode";
-import { getConfig } from "./config";
+import { ExtensionConfig, getConfig } from "./config";
 import { handleError } from "./logger";
 import { NonAsciiMatch } from "./scanner";
 
 type GetCachedMatchesFn = (
   doc: vscode.TextDocument,
-  allowed: Set<string>,
-  includeStrings: boolean,
-  includeComments: boolean,
+  config: ExtensionConfig,
 ) => NonAsciiMatch[];
 
 function buildEdits(
   document: vscode.TextDocument,
   getCachedMatchesFn: GetCachedMatchesFn,
 ): vscode.TextEdit[] {
-  const config = getConfig(document.uri);
-  const matches = getCachedMatchesFn(
-    document,
-    config.allowedCharacters,
-    config.includeStrings,
-    config.includeComments,
-  );
+  const config = getConfig();
+  const matches = getCachedMatchesFn(document, config);
   if (matches.length === 0) return [];
 
   const repMap = new Map<string, string>();
