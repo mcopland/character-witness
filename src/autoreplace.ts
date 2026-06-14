@@ -3,7 +3,7 @@ import { ExtensionConfig, getConfig } from "./config";
 import { handleError } from "./logger";
 import { NonAsciiMatch } from "./scanner";
 
-type GetCachedMatchesFn = (
+export type GetCachedMatchesFn = (
   doc: vscode.TextDocument,
   config: ExtensionConfig,
 ) => NonAsciiMatch[];
@@ -11,8 +11,8 @@ type GetCachedMatchesFn = (
 function buildEdits(
   document: vscode.TextDocument,
   getCachedMatchesFn: GetCachedMatchesFn,
+  config: ExtensionConfig,
 ): vscode.TextEdit[] {
-  const config = getConfig();
   const matches = getCachedMatchesFn(document, config);
   if (matches.length === 0) return [];
 
@@ -38,7 +38,7 @@ export function buildReplacementEdits(
   try {
     const config = getConfig(document.uri);
     if (!config.enable || !config.autoReplaceOnSave) return [];
-    return buildEdits(document, getCachedMatchesFn);
+    return buildEdits(document, getCachedMatchesFn, config);
   } catch (err) {
     handleError("buildReplacementEdits", err);
     return [];
@@ -52,7 +52,7 @@ export function buildReplacementsOnDemand(
   try {
     const config = getConfig(document.uri);
     if (!config.enable) return [];
-    return buildEdits(document, getCachedMatchesFn);
+    return buildEdits(document, getCachedMatchesFn, config);
   } catch (err) {
     handleError("buildReplacementsOnDemand", err);
     return [];

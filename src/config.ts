@@ -36,6 +36,10 @@ function parseOverviewRulerLane(value: string): vscode.OverviewRulerLane {
   }
 }
 
+/**
+ * Convert the flat string-keyed decoration style map from settings into the
+ * structured `vscode.DecorationRenderOptions` object the VS Code API expects.
+ */
 export function buildDecorationRenderOptions(
   style: Record<string, string>,
 ): vscode.DecorationRenderOptions {
@@ -82,6 +86,10 @@ export interface ExtensionConfig {
   isLimited: boolean;
 }
 
+/**
+ * Compile glob patterns from the `ignoredPaths` setting into `Minimatch`
+ * instances. Dot-files are included by default (`dot: true`).
+ */
 export function compileIgnoredPaths(patterns: string[]): Minimatch[] {
   return patterns.map(p => new Minimatch(p, { dot: true }));
 }
@@ -136,8 +144,8 @@ export function getCharacterSeverity(
 const GLOBAL_CACHE_KEY = "__global__";
 const cachedConfigs = new Map<string, ExtensionConfig>();
 
-function readConfig(): ExtensionConfig {
-  const cfg = vscode.workspace.getConfiguration("characterWitness");
+function readConfig(resource?: vscode.Uri): ExtensionConfig {
+  const cfg = vscode.workspace.getConfiguration("characterWitness", resource);
   const trusted = vscode.workspace.isTrusted;
 
   const rawAllowed = cfg.get<string[]>("allowedCharacters", []);
@@ -209,4 +217,8 @@ export function getConfig(resource?: vscode.Uri): ExtensionConfig {
 export function invalidateConfigCache(): void {
   cachedConfigs.clear();
   log("config cache invalidated");
+}
+
+export function invalidateConfig(uri: vscode.Uri): void {
+  cachedConfigs.delete(uri.toString());
 }

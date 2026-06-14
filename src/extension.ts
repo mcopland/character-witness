@@ -10,6 +10,7 @@ import {
   ExtensionConfig,
   getCharacterSeverity,
   getConfig,
+  invalidateConfig,
   invalidateConfigCache,
 } from "./config";
 import {
@@ -53,6 +54,11 @@ function touchCacheEntry(key: string, entry: ScanCacheEntry): void {
   }
 }
 
+/**
+ * Return true if the document's path matches any of the compiled `ignoredPaths`
+ * globs. Paths are tested relative to the workspace folder when one is open,
+ * and as absolute paths otherwise.
+ */
 export function isIgnoredDocument(
   document: { uri: vscode.Uri },
   ignoredPaths: Minimatch[],
@@ -229,6 +235,8 @@ function scheduleUpdate(editor: vscode.TextEditor): void {
     clearTimeout(debounceTimer);
   }
   debounceTimer = setTimeout(() => {
+    if (editor.document.isClosed) return;
+    if (editor !== vscode.window.activeTextEditor) return;
     updateEditor(editor);
   }, DEBOUNCE_MS);
 }
@@ -277,7 +285,7 @@ export function activate(context: vscode.ExtensionContext): void {
       try {
         const editor = vscode.window.activeTextEditor;
         if (editor && event.document === editor.document) {
-          const config = getConfig();
+          const config = getConfig(event.document.uri);
           tryIncrementalUpdate(event, config);
           scheduleUpdate(editor);
         }
@@ -349,6 +357,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidCloseTextDocument(document => {
       diagnosticCollection.delete(document.uri);
       scanCache.delete(document.uri.toString());
+      invalidateConfig(document.uri);
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = undefined;
+      }
     }),
   );
 
@@ -357,18 +370,23 @@ export function activate(context: vscode.ExtensionContext): void {
       [{ scheme: "file" }, { scheme: "untitled" }],
       {
         provideHover(document, position) {
-          const config = getConfig();
-          const matches = getCachedMatches(document, config);
-          const match = findMatchAtPosition(matches, position);
-          if (!match) return undefined;
-          return new vscode.Hover(
-            formatHoverMarkdown(
-              match,
-              config.codePointFormat,
-              config.codePointCase,
-            ),
-            match.range,
-          );
+          try {
+            const config = getConfig(document.uri);
+            const matches = getCachedMatches(document, config);
+            const match = findMatchAtPosition(matches, position);
+            if (!match) return undefined;
+            return new vscode.Hover(
+              formatHoverMarkdown(
+                match,
+                config.codePointFormat,
+                config.codePointCase,
+              ),
+              match.range,
+            );
+          } catch (err) {
+            logError("provideHover", err);
+            return undefined;
+          }
         },
       },
     ),

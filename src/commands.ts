@@ -1,14 +1,9 @@
 import * as vscode from "vscode";
-import { buildReplacementsOnDemand } from "./autoreplace";
-import { ExtensionConfig, getConfig } from "./config";
+import { buildReplacementsOnDemand, GetCachedMatchesFn } from "./autoreplace";
+import { getConfig } from "./config";
 import { handleError } from "./logger";
 import { findNextMatchAfter, NonAsciiMatch } from "./scanner";
-import { parseCharacterEntry, toHex } from "./utils";
-
-type GetCachedMatchesFn = (
-  doc: vscode.TextDocument,
-  config: ExtensionConfig,
-) => NonAsciiMatch[];
+import { formatCodePoint, parseCharacterEntry, toHex } from "./utils";
 
 export async function goToNextNonAsciiCharacter(
   getCachedMatchesFn: GetCachedMatchesFn,
@@ -156,7 +151,11 @@ export async function addToAllowedCharacters(
     for (const ch of charsToAdd) {
       if (!existingChars.has(ch)) {
         const cp = ch.codePointAt(0)!;
-        const entry = "u+" + toHex(cp);
+        const entry = formatCodePoint(
+          toHex(cp),
+          config.codePointFormat,
+          config.codePointCase,
+        );
         newEntries.push(entry);
         addedEntries.push(entry);
       }

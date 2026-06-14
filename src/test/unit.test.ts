@@ -2,6 +2,11 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 
 vi.mock("vscode", () => ({
+  ConfigurationTarget: {
+    Global: 1,
+    Workspace: 2,
+    WorkspaceFolder: 3,
+  },
   Range: class {
     constructor(
       public start: { line: number; character: number },
@@ -49,6 +54,7 @@ vi.mock("vscode", () => ({
   window: {
     activeTextEditor: undefined as unknown,
     showInformationMessage: vi.fn().mockResolvedValue(undefined),
+    showErrorMessage: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -57,13 +63,14 @@ vi.mock("vscode", () => ({
 // Run with:  npx vitest run
 // ---------------------------------------------------------------------------
 
-import { goToNextNonAsciiCharacter } from "../commands";
+import { addToAllowedCharacters, goToNextNonAsciiCharacter } from "../commands";
 import * as configModule from "../config";
 import {
   compileIgnoredPaths,
   ExtensionConfig,
   getCharacterSeverity,
 } from "../config";
+import { handleError } from "../logger";
 import { isIgnoredDocument } from "../extension";
 import { getCharacterName, UNICODE_VERSION } from "../generated/unicode-names";
 import { getTextRegions } from "../regions";
@@ -157,6 +164,27 @@ describe("parseCharacterEntries", () => {
     assert.strictEqual(parseCharacterEntries("0x2018 - 0x2020").length, 9));
   test("range with mixed formats", () =>
     assert.strictEqual(parseCharacterEntries("u+2018 - 0x2020").length, 9));
+  test("oversized range returns empty array", { timeout: 500 }, () =>
+    assert.deepStrictEqual(parseCharacterEntries("u+0000 - u+10ffff"), []),
+  );
+  test("range spanning surrogates excludes 0xD800-0xDFFF", () => {
+    const result = parseCharacterEntries("u+d7ff - u+e000");
+    for (const ch of result) {
+      const cp = ch.codePointAt(0)!;
+      assert.ok(
+        cp < 0xd800 || cp > 0xdfff,
+        `surrogate U+${cp.toString(16)} must not appear in result`,
+      );
+    }
+    assert.ok(
+      result.some(ch => ch.codePointAt(0) === 0xd7ff),
+      "U+D7FF should be included",
+    );
+    assert.ok(
+      result.some(ch => ch.codePointAt(0) === 0xe000),
+      "U+E000 should be included",
+    );
+  });
 });
 
 describe("parseCharacterGroup", () => {
@@ -257,6 +285,16 @@ describe("formatCodePoint", () => {
     assert.strictEqual(formatCodePoint("1f600", "u+", "upper"), "U+1F600");
     assert.strictEqual(formatCodePoint("1f600", "u+", "lower"), "u+1f600");
   });
+  test("\\u format emits surrogate pair for astral code points (upper)", () =>
+    assert.strictEqual(
+      formatCodePoint("1f600", "\\u", "upper"),
+      "\\uD83D\\uDE00",
+    ));
+  test("\\u format emits surrogate pair for astral code points (lower)", () =>
+    assert.strictEqual(
+      formatCodePoint("1f600", "\\u", "lower"),
+      "\\ud83d\\ude00",
+    ));
 });
 
 describe("Unicode name lookups", () => {
@@ -302,35 +340,9 @@ describe("Unicode name lookups", () => {
   });
 });
 
-function makeMatch(char: string): NonAsciiMatch {
-  return {
-    char,
-    codePoint: char.codePointAt(0)!,
-    hex: "00b7",
-    unicodeName: undefined,
-    range: new vscode.Range(
-      new vscode.Position(0, 0),
-      new vscode.Position(0, 1),
-    ),
-  };
-}
-
-function makeMatchAt(line: number, character: number): NonAsciiMatch {
-  return {
-    char: "\u00b7",
-    codePoint: 0x00b7,
-    hex: "00b7",
-    unicodeName: undefined,
-    range: new vscode.Range(
-      new vscode.Position(line, character),
-      new vscode.Position(line, character + 1),
-    ),
-  };
-}
-
 describe("formatGroupedDiagnosticMessage", () => {
   test("single match delegates to single-char format", () => {
-    const m = { ...makeMatch("·"), unicodeName: "MIDDLE DOT" };
+    const m = { ...buildMatch(0, 0, 1, "·"), unicodeName: "MIDDLE DOT" };
     assert.strictEqual(
       formatGroupedDiagnosticMessage([m]),
       "Middle Dot '·' U+00B7",
@@ -339,13 +351,18 @@ describe("formatGroupedDiagnosticMessage", () => {
 
   test("two matches produces compact array format", () => {
     assert.strictEqual(
-      formatGroupedDiagnosticMessage([makeMatch("·"), makeMatch("—")]),
+      formatGroupedDiagnosticMessage([
+        buildMatch(0, 0, 1, "·"),
+        buildMatch(0, 0, 1, "—"),
+      ]),
       "2 non-ASCII characters: ['·', '—']",
     );
   });
 
   test("count reflects number of matches", () => {
-    const matches = ["·", "·", "©", "®", "™", "°"].map(makeMatch);
+    const matches = ["·", "·", "©", "®", "™", "°"].map(c =>
+      buildMatch(0, 0, 1, c),
+    );
     assert.ok(
       formatGroupedDiagnosticMessage(matches).startsWith(
         "6 non-ASCII characters: ",
@@ -355,15 +372,15 @@ describe("formatGroupedDiagnosticMessage", () => {
 
   test("array contains each char in order", () => {
     const result = formatGroupedDiagnosticMessage([
-      makeMatch("·"),
-      makeMatch("©"),
-      makeMatch("®"),
+      buildMatch(0, 0, 1, "·"),
+      buildMatch(0, 0, 1, "©"),
+      buildMatch(0, 0, 1, "®"),
     ]);
     assert.strictEqual(result, "3 non-ASCII characters: ['·', '©', '®']");
   });
 
   test("single match with non-default format and case", () => {
-    const m = { ...makeMatch("·"), unicodeName: "MIDDLE DOT" };
+    const m = { ...buildMatch(0, 0, 1, "·"), unicodeName: "MIDDLE DOT" };
     assert.strictEqual(
       formatGroupedDiagnosticMessage([m], "0x", "upper"),
       "Middle Dot '·' 0x00B7",
@@ -493,7 +510,7 @@ describe("goToNextNonAsciiCharacter", () => {
   });
 
   test("selects first match when cursor is before all matches", async () => {
-    const matches = [makeMatchAt(1, 0), makeMatchAt(2, 0)];
+    const matches = [buildMatch(1, 0), buildMatch(2, 0)];
     const getCachedMatches = vi.fn().mockReturnValue(matches);
     mockEditor.selection = { active: new vscode.Position(0, 5) };
     await goToNextNonAsciiCharacter(getCachedMatches);
@@ -504,7 +521,7 @@ describe("goToNextNonAsciiCharacter", () => {
   });
 
   test("selects the next match after the cursor", async () => {
-    const matches = [makeMatchAt(1, 0), makeMatchAt(3, 0), makeMatchAt(5, 0)];
+    const matches = [buildMatch(1, 0), buildMatch(3, 0), buildMatch(5, 0)];
     const getCachedMatches = vi.fn().mockReturnValue(matches);
     mockEditor.selection = { active: new vscode.Position(2, 0) };
     await goToNextNonAsciiCharacter(getCachedMatches);
@@ -514,7 +531,7 @@ describe("goToNextNonAsciiCharacter", () => {
   });
 
   test("wraps to first match when cursor is at or after the last match", async () => {
-    const matches = [makeMatchAt(1, 0), makeMatchAt(3, 0)];
+    const matches = [buildMatch(1, 0), buildMatch(3, 0)];
     const getCachedMatches = vi.fn().mockReturnValue(matches);
     mockEditor.selection = { active: new vscode.Position(5, 0) };
     await goToNextNonAsciiCharacter(getCachedMatches);
@@ -926,15 +943,21 @@ describe("findNonAsciiCharacters", () => {
 // findMatchAtPosition
 // ---------------------------------------------------------------------------
 
-function buildMatch(line: number, char: number, length = 1): NonAsciiMatch {
+function buildMatch(
+  line: number,
+  col: number,
+  length = 1,
+  char = "·",
+): NonAsciiMatch {
+  const codePoint = char.codePointAt(0)!;
   return {
-    char: "x",
-    codePoint: 0x78,
-    hex: "0078",
+    char,
+    codePoint,
+    hex: codePoint.toString(16).padStart(4, "0"),
     unicodeName: undefined,
     range: new vscode.Range(
-      new vscode.Position(line, char),
-      new vscode.Position(line, char + length),
+      new vscode.Position(line, col),
+      new vscode.Position(line, col + length),
     ),
   } as unknown as NonAsciiMatch;
 }
@@ -1063,18 +1086,19 @@ describe("countLineBreaks", () => {
 // Incremental rescan: shared harness
 // ---------------------------------------------------------------------------
 
+function offsetOf(lines: string[], line: number, char: number): number {
+  let off = 0;
+  for (let l = 0; l < line; l++) off += lines[l].length + 1;
+  return off + char;
+}
+
 function richMockDocument(text: string): vscode.TextDocument {
   const lines = text.split("\n");
-  function offsetOf(line: number, char: number): number {
-    let off = 0;
-    for (let l = 0; l < line; l++) off += lines[l].length + 1;
-    return off + char;
-  }
   return {
     getText: (range?: vscode.Range) => {
       if (!range) return text;
-      const s = offsetOf(range.start.line, range.start.character);
-      const e = offsetOf(range.end.line, range.end.character);
+      const s = offsetOf(lines, range.start.line, range.start.character);
+      const e = offsetOf(lines, range.end.line, range.end.character);
       return text.slice(s, e);
     },
     lineCount: lines.length,
@@ -1099,13 +1123,12 @@ function applyChangeToText(
   },
 ): string {
   const lines = text.split("\n");
-  const offsetOf = (line: number, char: number) => {
-    let off = 0;
-    for (let l = 0; l < line; l++) off += lines[l].length + 1;
-    return off + char;
-  };
-  const s = offsetOf(change.range.start.line, change.range.start.character);
-  const e = offsetOf(change.range.end.line, change.range.end.character);
+  const s = offsetOf(
+    lines,
+    change.range.start.line,
+    change.range.start.character,
+  );
+  const e = offsetOf(lines, change.range.end.line, change.range.end.character);
   return text.slice(0, s) + change.text + text.slice(e);
 }
 
@@ -1431,4 +1454,198 @@ describe("incremental rescan property test", () => {
       matches = incremental;
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// addToAllowedCharacters -- written entry must respect codePointFormat/Case
+// ---------------------------------------------------------------------------
+
+describe("addToAllowedCharacters", () => {
+  // U+00A9 COPYRIGHT SIGN constructed at runtime to avoid triggering the
+  // extension's scan on this source file.
+  const COPYRIGHT = String.fromCodePoint(0xa9);
+  let mockUpdate: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockUpdate = vi.fn().mockResolvedValue(undefined);
+    const mockCfg = {
+      get: vi.fn((_key: string, defaultValue: unknown) => defaultValue),
+      inspect: vi.fn(() => ({ workspaceValue: undefined, globalValue: [] })),
+      update: mockUpdate,
+    };
+    Object.assign(vscode.workspace, {
+      getConfiguration: vi.fn().mockReturnValue(mockCfg),
+    });
+    const mockEditor = {
+      document: {
+        uri: { toString: () => "file:///test.ts", fsPath: "/test.ts" },
+        getText: (_range?: unknown) => COPYRIGHT,
+      },
+      selections: [
+        {
+          isEmpty: false,
+          anchor: new vscode.Position(0, 0),
+          active: new vscode.Position(0, 1),
+        },
+      ],
+    };
+    (vscode.window as { activeTextEditor: unknown }).activeTextEditor =
+      mockEditor;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    (vscode.window as { activeTextEditor: unknown }).activeTextEditor =
+      undefined;
+  });
+
+  test("writes entry using codePointFormat=0x and codePointCase=upper", async () => {
+    vi.spyOn(configModule, "getConfig").mockReturnValue({
+      enable: true,
+      allowedCharacters: new Set<string>(),
+      codePointFormat: "0x",
+      codePointCase: "upper",
+    } as unknown as ExtensionConfig);
+    await addToAllowedCharacters();
+    const writtenEntries = mockUpdate.mock.calls[0]?.[1] as
+      | string[]
+      | undefined;
+    assert.ok(
+      writtenEntries !== undefined,
+      "cfg.update should have been called",
+    );
+    assert.ok(
+      writtenEntries.includes("0x00A9"),
+      `expected "0x00A9" in ${JSON.stringify(writtenEntries)}`,
+    );
+  });
+
+  test("writes entry using codePointFormat=u+ and codePointCase=upper", async () => {
+    vi.spyOn(configModule, "getConfig").mockReturnValue({
+      enable: true,
+      allowedCharacters: new Set<string>(),
+      codePointFormat: "u+",
+      codePointCase: "upper",
+    } as unknown as ExtensionConfig);
+    await addToAllowedCharacters();
+    const writtenEntries = mockUpdate.mock.calls[0]?.[1] as
+      | string[]
+      | undefined;
+    assert.ok(
+      writtenEntries !== undefined,
+      "cfg.update should have been called",
+    );
+    assert.ok(
+      writtenEntries.includes("U+00A9"),
+      `expected "U+00A9" in ${JSON.stringify(writtenEntries)}`,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// invalidateConfig -- per-URI eviction
+// ---------------------------------------------------------------------------
+
+describe("invalidateConfig", () => {
+  beforeEach(() => {
+    const mockCfgObj = {
+      get: vi.fn((_key: string, defaultValue: unknown) => defaultValue),
+      inspect: vi.fn(() => undefined),
+    };
+    Object.assign(vscode.workspace, {
+      getConfiguration: vi.fn().mockReturnValue(mockCfgObj),
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    configModule.invalidateConfigCache();
+  });
+
+  test("evicts URI-specific entry so next getConfig re-reads", () => {
+    const fakeUri = {
+      toString: () => "file:///unique-test-uri.ts",
+    } as vscode.Uri;
+    const getConfigurationSpy = (
+      vscode.workspace as unknown as {
+        getConfiguration: ReturnType<typeof vi.fn>;
+      }
+    ).getConfiguration;
+
+    configModule.getConfig(fakeUri);
+    assert.strictEqual(
+      getConfigurationSpy.mock.calls.length,
+      1,
+      "first call should read config",
+    );
+    configModule.getConfig(fakeUri);
+    assert.strictEqual(
+      getConfigurationSpy.mock.calls.length,
+      1,
+      "second call should be a cache hit",
+    );
+    configModule.invalidateConfig(fakeUri);
+    configModule.getConfig(fakeUri);
+    assert.strictEqual(
+      getConfigurationSpy.mock.calls.length,
+      2,
+      "after invalidation, getConfig should re-read",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleError -- duplicate notification throttling
+// ---------------------------------------------------------------------------
+
+describe("handleError", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mockClear();
+  });
+
+  afterEach(() => {
+    vi.runAllTimers();
+    vi.useRealTimers();
+  });
+
+  test("shows error message on first call", () => {
+    handleError("ctx", new Error("something broke"));
+    assert.strictEqual(
+      (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls
+        .length,
+      1,
+    );
+  });
+
+  test("suppresses duplicate message within throttle window", () => {
+    handleError("ctx", new Error("same error"));
+    handleError("ctx", new Error("same error"));
+    assert.strictEqual(
+      (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls
+        .length,
+      1,
+    );
+  });
+
+  test("shows again after throttle window expires", () => {
+    handleError("ctx", new Error("same error"));
+    vi.advanceTimersByTime(11_000);
+    handleError("ctx", new Error("same error"));
+    assert.strictEqual(
+      (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls
+        .length,
+      2,
+    );
+  });
+
+  test("shows different message immediately even within throttle window", () => {
+    handleError("ctx", new Error("error A"));
+    handleError("ctx", new Error("error B"));
+    assert.strictEqual(
+      (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls
+        .length,
+      2,
+    );
+  });
 });
