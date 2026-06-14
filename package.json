@@ -10,7 +10,8 @@
     "url": "https://github.com/mcopland/character-witness.git"
   },
   "engines": {
-    "vscode": "^1.109.0"
+    "vscode": "^1.109.0",
+    "node": ">=22"
   },
   "icon": "icon.png",
   "galleryBanner": {
