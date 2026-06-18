@@ -10,7 +10,7 @@ Non-ASCII characters silently break builds, cause encoding issues, and create ha
 
 ### Visual Highlighting
 
-Non-ASCII characters are highlighted with a fully customizable decoration style. The default is a semi-transparent red background with a red border and crosshair cursor, but every visual property (colors, borders, font, cursor, opacity, and more) is configurable. Color properties show VS Code's native color picker in Settings.
+Non-ASCII characters are highlighted with a fully customizable decoration style. The default is a semi-transparent cyan background with a faint cyan border and a help cursor, but every visual property (colors, borders, font, cursor, opacity, and more) is configurable.
 
 ### Problems Panel Diagnostics
 
@@ -50,25 +50,25 @@ Master toggle. Set to `false` to disable all highlighting, diagnostics, and auto
 
 **Type:** `object`
 
-Fully customizable visual style for highlighted characters. Color properties (`backgroundColor`, `color`, `borderColor`, `overviewRulerColor`) show VS Code's native color picker in the Settings UI.
+Fully customizable visual style for highlighted characters.
 
-| Property             | Type   | Default               | Description                                                      |
-| -------------------- | ------ | --------------------- | ---------------------------------------------------------------- |
-| `backgroundColor`    | color  | `rgba(255,0,0,0.3)`   | Background fill (hex or rgba)                                    |
-| `color`              | color  | `rgba(255,255,255,1)` | Foreground text color                                            |
-| `borderWidth`        | string | `1px`                 | Border width                                                     |
-| `borderStyle`        | enum   | `solid`               | `solid`, `dashed`, `dotted`, `double`, `none`                    |
-| `borderColor`        | color  | `#ff0000`             | Border color                                                     |
-| `borderRadius`       | string | `2px`                 | Corner rounding                                                  |
-| `cursor`             | enum   | `crosshair`           | `default`, `pointer`, `crosshair`, `help`, `not-allowed`, `text` |
-| `fontWeight`         | string | _(empty)_             | e.g. `bold`, `700`                                               |
-| `fontStyle`          | enum   | _(empty)_             | `italic`, `normal`                                               |
-| `outline`            | string | _(empty)_             | CSS outline shorthand (e.g. `2px dashed blue`)                   |
-| `textDecoration`     | string | _(empty)_             | CSS text-decoration (e.g. `underline wavy red`)                  |
-| `letterSpacing`      | string | _(empty)_             | e.g. `1px`, `0.5em`                                              |
-| `opacity`            | string | _(empty)_             | `0` to `1`                                                       |
-| `overviewRulerColor` | color  | `rgba(255,0,0,0.6)`   | Minimap scrollbar indicator color                                |
-| `overviewRulerLane`  | enum   | `Center`              | `Left`, `Center`, `Right`, `Full`                                |
+| Property             | Type   | Default                 | Description                                                      |
+| -------------------- | ------ | ----------------------- | ---------------------------------------------------------------- |
+| `backgroundColor`    | string | `rgba(125,249,255,0.2)` | Background fill (hex or rgba)                                    |
+| `color`              | string | `rgba(125,249,255,1)`   | Foreground text color                                            |
+| `borderWidth`        | string | `2px`                   | Border width                                                     |
+| `borderStyle`        | enum   | `solid`                 | `solid`, `dashed`, `dotted`, `double`, `none`                    |
+| `borderColor`        | string | `rgba(125,249,255,0.1)` | Border color                                                     |
+| `borderRadius`       | string | `4px`                   | Corner rounding                                                  |
+| `cursor`             | enum   | `help`                  | `default`, `pointer`, `crosshair`, `help`, `not-allowed`, `text` |
+| `fontWeight`         | string | `600`                   | e.g. `bold`, `700`                                               |
+| `fontStyle`          | enum   | `normal`                | `italic`, `normal`                                               |
+| `outline`            | string | _(empty)_               | CSS outline shorthand (e.g. `2px dashed blue`)                   |
+| `textDecoration`     | string | _(empty)_               | CSS text-decoration (e.g. `underline wavy red`)                  |
+| `letterSpacing`      | string | _(empty)_               | e.g. `1px`, `0.5em`                                              |
+| `opacity`            | string | `1`                     | `0` to `1`                                                       |
+| `overviewRulerColor` | string | _(empty)_               | Minimap scrollbar indicator color                                |
+| `overviewRulerLane`  | enum   | `Center`                | `Left`, `Center`, `Right`, `Full`                                |
 
 ### `characterWitness.allowedCharacters`
 

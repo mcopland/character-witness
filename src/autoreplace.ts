@@ -1,26 +1,19 @@
 import * as vscode from "vscode";
-import { getConfig } from "./config";
+import { ExtensionConfig, getConfig } from "./config";
 import { handleError } from "./logger";
 import { NonAsciiMatch } from "./scanner";
 
-type GetCachedMatchesFn = (
+export type GetCachedMatchesFn = (
   doc: vscode.TextDocument,
-  allowed: Set<string>,
-  includeStrings: boolean,
-  includeComments: boolean,
+  config: ExtensionConfig,
 ) => NonAsciiMatch[];
 
 function buildEdits(
   document: vscode.TextDocument,
   getCachedMatchesFn: GetCachedMatchesFn,
+  config: ExtensionConfig,
 ): vscode.TextEdit[] {
-  const config = getConfig(document.uri);
-  const matches = getCachedMatchesFn(
-    document,
-    config.allowedCharacters,
-    config.includeStrings,
-    config.includeComments,
-  );
+  const matches = getCachedMatchesFn(document, config);
   if (matches.length === 0) return [];
 
   const repMap = new Map<string, string>();
@@ -45,7 +38,7 @@ export function buildReplacementEdits(
   try {
     const config = getConfig(document.uri);
     if (!config.enable || !config.autoReplaceOnSave) return [];
-    return buildEdits(document, getCachedMatchesFn);
+    return buildEdits(document, getCachedMatchesFn, config);
   } catch (err) {
     handleError("buildReplacementEdits", err);
     return [];
@@ -59,7 +52,7 @@ export function buildReplacementsOnDemand(
   try {
     const config = getConfig(document.uri);
     if (!config.enable) return [];
-    return buildEdits(document, getCachedMatchesFn);
+    return buildEdits(document, getCachedMatchesFn, config);
   } catch (err) {
     handleError("buildReplacementsOnDemand", err);
     return [];

@@ -1,17 +1,12 @@
 import * as vscode from "vscode";
-import { buildReplacementsOnDemand } from "./autoreplace";
+import { buildReplacementsOnDemand, GetCachedMatchesFn } from "./autoreplace";
 import { getConfig } from "./config";
 import { handleError } from "./logger";
-import { NonAsciiMatch } from "./scanner";
-import { parseCharacterEntry, toHex } from "./utils";
+import { findNextMatchAfter, NonAsciiMatch } from "./scanner";
+import { formatCodePoint, parseCharacterEntry, toHex } from "./utils";
 
 export async function goToNextNonAsciiCharacter(
-  getCachedMatchesFn: (
-    doc: vscode.TextDocument,
-    allowed: Set<string>,
-    includeStrings: boolean,
-    includeComments: boolean,
-  ) => NonAsciiMatch[],
+  getCachedMatchesFn: GetCachedMatchesFn,
 ): Promise<void> {
   try {
     const editor = vscode.window.activeTextEditor;
@@ -20,12 +15,7 @@ export async function goToNextNonAsciiCharacter(
     const config = getConfig(editor.document.uri);
     if (!config.enable) return;
 
-    const matches = getCachedMatchesFn(
-      editor.document,
-      config.allowedCharacters,
-      config.includeStrings,
-      config.includeComments,
-    );
+    const matches = getCachedMatchesFn(editor.document, config);
     if (matches.length === 0) {
       vscode.window.showInformationMessage(
         "Character Witness: No non-ASCII characters found.",
@@ -34,10 +24,7 @@ export async function goToNextNonAsciiCharacter(
     }
 
     const cursor = editor.selection.active;
-    let next = matches.find(m => m.range.start.isAfter(cursor));
-    if (!next) {
-      next = matches[0];
-    }
+    const next = findNextMatchAfter(matches, cursor) ?? matches[0];
 
     editor.selection = new vscode.Selection(next.range.start, next.range.start);
     editor.revealRange(
@@ -50,12 +37,7 @@ export async function goToNextNonAsciiCharacter(
 }
 
 export async function applyReplacementsNow(
-  getCachedMatchesFn: (
-    doc: vscode.TextDocument,
-    allowed: Set<string>,
-    includeStrings: boolean,
-    includeComments: boolean,
-  ) => NonAsciiMatch[],
+  getCachedMatchesFn: GetCachedMatchesFn,
   onComplete?: (editor: vscode.TextEditor) => void,
 ): Promise<void> {
   try {
@@ -145,7 +127,18 @@ export async function addToAllowedCharacters(
 
     // Read the current array and append new entries as u+HHHH strings
     const cfg = vscode.workspace.getConfiguration("characterWitness");
-    const existing: string[] = cfg.get<string[]>("allowedCharacters", []);
+
+    const hasWorkspace =
+      vscode.workspace.workspaceFolders !== undefined &&
+      vscode.workspace.workspaceFolders.length > 0;
+    const target = hasWorkspace
+      ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global;
+
+    const inspected = cfg.inspect<string[]>("allowedCharacters");
+    const existing: string[] = hasWorkspace
+      ? (inspected?.workspaceValue ?? [])
+      : (inspected?.globalValue ?? []);
 
     const existingChars = new Set<string>();
     for (const entry of existing) {
@@ -153,27 +146,38 @@ export async function addToAllowedCharacters(
       if (ch) existingChars.add(ch);
     }
 
+    const addedEntries: string[] = [];
     const newEntries: string[] = [...existing];
     for (const ch of charsToAdd) {
       if (!existingChars.has(ch)) {
         const cp = ch.codePointAt(0)!;
-        newEntries.push("u+" + toHex(cp));
+        const entry = formatCodePoint(
+          toHex(cp),
+          config.codePointFormat,
+          config.codePointCase,
+        );
+        newEntries.push(entry);
+        addedEntries.push(entry);
       }
     }
 
-    await cfg.update(
-      "allowedCharacters",
-      newEntries,
-      vscode.ConfigurationTarget.Global,
-    );
+    await cfg.update("allowedCharacters", newEntries, target);
 
-    const added = Array.from(charsToAdd).map(ch => {
-      const cp = ch.codePointAt(0)!;
-      return "u+" + toHex(cp);
-    });
-    vscode.window.showInformationMessage(
-      `Character Witness: Added ${added.join(", ")} to allowed list.`,
-    );
+    const scopeLabel = hasWorkspace ? "workspace" : "user settings";
+    const message = `Character Witness: Added ${addedEntries.join(", ")} to ${scopeLabel} allowed list.`;
+
+    if (hasWorkspace) {
+      const moveAction = "Save to User Settings instead";
+      const choice = await vscode.window.showInformationMessage(
+        message,
+        moveAction,
+      );
+      if (choice === moveAction) {
+        await moveAllowedEntriesToGlobal(cfg, addedEntries);
+      }
+    } else {
+      vscode.window.showInformationMessage(message);
+    }
 
     // Refresh the active editor immediately via callback
     if (onComplete) {
@@ -182,4 +186,38 @@ export async function addToAllowedCharacters(
   } catch (err) {
     handleError("addToAllowedCharacters", err);
   }
+}
+
+async function moveAllowedEntriesToGlobal(
+  cfg: vscode.WorkspaceConfiguration,
+  entries: string[],
+): Promise<void> {
+  const inspected = cfg.inspect<string[]>("allowedCharacters");
+  const wsCurrent: string[] = inspected?.workspaceValue ?? [];
+  const globalCurrent: string[] = inspected?.globalValue ?? [];
+
+  const entrySet = new Set(entries);
+  const wsNext = wsCurrent.filter(e => !entrySet.has(e));
+
+  const globalChars = new Set<string>();
+  for (const e of globalCurrent) {
+    const ch = parseCharacterEntry(e);
+    if (ch) globalChars.add(ch);
+  }
+  const globalNext = [...globalCurrent];
+  for (const e of entries) {
+    const ch = parseCharacterEntry(e);
+    if (ch && !globalChars.has(ch)) globalNext.push(e);
+  }
+
+  await cfg.update(
+    "allowedCharacters",
+    wsNext.length > 0 ? wsNext : undefined,
+    vscode.ConfigurationTarget.Workspace,
+  );
+  await cfg.update(
+    "allowedCharacters",
+    globalNext,
+    vscode.ConfigurationTarget.Global,
+  );
 }

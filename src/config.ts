@@ -1,3 +1,4 @@
+import { Minimatch } from "minimatch";
 import * as vscode from "vscode";
 import { log } from "./logger";
 import { ERROR_LEVEL_CODEPOINTS } from "./scanner";
@@ -35,6 +36,10 @@ function parseOverviewRulerLane(value: string): vscode.OverviewRulerLane {
   }
 }
 
+/**
+ * Convert the flat string-keyed decoration style map from settings into the
+ * structured `vscode.DecorationRenderOptions` object the VS Code API expects.
+ */
 export function buildDecorationRenderOptions(
   style: Record<string, string>,
 ): vscode.DecorationRenderOptions {
@@ -67,6 +72,7 @@ export interface ExtensionConfig {
   enable: boolean;
   decoration: Record<string, string>;
   allowedCharacters: Set<string>;
+  allowedCharactersKey: string;
   autoReplaceOnSave: boolean;
   replacements: ReplacementEntry[];
   severityOverrides: Map<string, vscode.DiagnosticSeverity>;
@@ -74,31 +80,18 @@ export interface ExtensionConfig {
   includeComments: boolean;
   codePointFormat: string;
   codePointCase: string;
-  ignoredPaths: RegExp[];
+  ignoredPaths: Minimatch[];
   diagnosticSeverities: Set<vscode.DiagnosticSeverity>;
+  maxFileSizeBytes: number;
+  isLimited: boolean;
 }
 
-function globToRegExp(glob: string): RegExp {
-  let result = "";
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i];
-    if (c === "*" && glob[i + 1] === "*") {
-      result += ".*";
-      i++;
-      if (glob[i + 1] === "/") i++;
-    } else if (c === "*") {
-      result += "[^/]*";
-    } else if (c === "?") {
-      result += "[^/]";
-    } else {
-      result += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    }
-  }
-  return new RegExp("^" + result);
-}
-
-export function compileIgnoredPaths(patterns: string[]): RegExp[] {
-  return patterns.map(globToRegExp);
+/**
+ * Compile glob patterns from the `ignoredPaths` setting into `Minimatch`
+ * instances. Dot-files are included by default (`dot: true`).
+ */
+export function compileIgnoredPaths(patterns: string[]): Minimatch[] {
+  return patterns.map(p => new Minimatch(p, { dot: true }));
 }
 
 function parseSeverityString(
@@ -151,8 +144,10 @@ export function getCharacterSeverity(
 const GLOBAL_CACHE_KEY = "__global__";
 const cachedConfigs = new Map<string, ExtensionConfig>();
 
-function readConfig(resource: vscode.Uri | undefined): ExtensionConfig {
+function readConfig(resource?: vscode.Uri): ExtensionConfig {
   const cfg = vscode.workspace.getConfiguration("characterWitness", resource);
+  const trusted = vscode.workspace.isTrusted;
+
   const rawAllowed = cfg.get<string[]>("allowedCharacters", []);
   const allowedSet = new Set<string>();
   for (const entry of rawAllowed) {
@@ -160,6 +155,7 @@ function readConfig(resource: vscode.Uri | undefined): ExtensionConfig {
       allowedSet.add(ch);
     }
   }
+  const allowedCharactersKey = [...allowedSet].sort().join(",");
 
   const rawDecoration = cfg.get<Record<string, string>>("decoration", {});
   const decoration: Record<string, string> = {
@@ -185,19 +181,27 @@ function readConfig(resource: vscode.Uri | undefined): ExtensionConfig {
     if (severity !== undefined) diagnosticSeverities.add(severity);
   }
 
+  const maxKb = cfg.get<number>("maxFileSizeKb", 10240);
+  const maxFileSizeBytes = maxKb > 0 ? maxKb * 1024 : Number.POSITIVE_INFINITY;
+
   return {
     enable: cfg.get<boolean>("enable", true),
     decoration,
     allowedCharacters: allowedSet,
-    autoReplaceOnSave: cfg.get<boolean>("autoReplaceOnSave", false),
-    replacements: parseReplacementMap(rawReplacements),
+    allowedCharactersKey,
+    autoReplaceOnSave: trusted && cfg.get<boolean>("autoReplaceOnSave", false),
+    replacements: trusted ? parseReplacementMap(rawReplacements) : [],
     severityOverrides: parseSeverityOverrides(rawSeverityOverrides),
     includeStrings: cfg.get<boolean>("includeStrings", true),
     includeComments: cfg.get<boolean>("includeComments", true),
     codePointFormat: cfg.get<string>("codePointFormat", "u+"),
     codePointCase: cfg.get<string>("codePointCase", "upper"),
-    ignoredPaths: compileIgnoredPaths(cfg.get<string[]>("ignoredPaths", [])),
+    ignoredPaths: trusted
+      ? compileIgnoredPaths(cfg.get<string[]>("ignoredPaths", []))
+      : [],
     diagnosticSeverities,
+    maxFileSizeBytes,
+    isLimited: !trusted,
   };
 }
 
@@ -213,4 +217,8 @@ export function getConfig(resource?: vscode.Uri): ExtensionConfig {
 export function invalidateConfigCache(): void {
   cachedConfigs.clear();
   log("config cache invalidated");
+}
+
+export function invalidateConfig(uri: vscode.Uri): void {
+  cachedConfigs.delete(uri.toString());
 }

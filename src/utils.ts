@@ -1,3 +1,5 @@
+import { log } from "./logger";
+
 /**
  * Normalize a settings-supplied character string into its literal character.
  *
@@ -34,6 +36,8 @@ export function parseCharacterEntry(raw: string): string | undefined {
   return undefined;
 }
 
+const MAX_RANGE_SPAN = 0x4000;
+
 /**
  * Parse a settings entry that may be a single character entry or a range.
  * Range syntax: "u+2500 - u+2502" (any supported notation on either side).
@@ -48,8 +52,15 @@ export function parseCharacterEntries(entry: string): string[] {
     const startCode = startChar.codePointAt(0)!;
     const endCode = endChar.codePointAt(0)!;
     if (startCode > endCode) return [];
+    if (endCode - startCode > MAX_RANGE_SPAN) {
+      log(
+        `character range "${entry.trim()}" exceeds maximum span of ${MAX_RANGE_SPAN}; ignoring`,
+      );
+      return [];
+    }
     const result: string[] = [];
     for (let cp = startCode; cp <= endCode; cp++) {
+      if (cp >= 0xd800 && cp <= 0xdfff) continue; // lone surrogates can never match real text
       result.push(String.fromCodePoint(cp));
     }
     return result;
@@ -110,8 +121,25 @@ export function formatCodePoint(
 ): string {
   const h = caseType === "upper" ? hex.toUpperCase() : hex.toLowerCase();
   switch (format) {
-    case "\\u":
+    case "\\u": {
+      const cp = parseInt(hex, 16);
+      if (cp > 0xffff) {
+        // Astral code points must be encoded as a UTF-16 surrogate pair because
+        // the \uHHHH form only accepts exactly 4 hex digits.
+        const hi = Math.floor((cp - 0x10000) / 0x400) + 0xd800;
+        const lo = ((cp - 0x10000) % 0x400) + 0xdc00;
+        const hiH =
+          caseType === "upper"
+            ? hi.toString(16).toUpperCase()
+            : hi.toString(16).toLowerCase();
+        const loH =
+          caseType === "upper"
+            ? lo.toString(16).toUpperCase()
+            : lo.toString(16).toLowerCase();
+        return "\\u" + hiH + "\\u" + loH;
+      }
       return "\\u" + h;
+    }
     case "\\u{}":
       return "\\u{" + h + "}";
     case "0x":
