@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { logError } from "../logger";
 
 export const UNICODE_VERSION = "16.0.0" as const;
 
@@ -32,23 +33,46 @@ const ALGORITHMIC_RANGES: readonly AlgorithmicRange[] = [
 /** Lookup map populated on first call. */
 let _nameMap: Map<number, string> | undefined;
 
-function getNameMap(): Map<number, string> {
-  if (_nameMap) return _nameMap;
-  const txt = fs.readFileSync(
-    path.join(__dirname, "../../resources/unicode-names.txt"),
-    "utf8",
-  );
-  _nameMap = new Map();
+/**
+ * Parse the packed name-table text produced by `npm run generate`.
+ * Each line is `HHHH NAME`, space-separated. Lines that cannot be
+ * parsed (no space, non-hex code point) are skipped so a corrupt data
+ * file degrades gracefully rather than populating the map with NaN keys.
+ */
+export function parseNameTable(txt: string): Map<number, string> {
+  const map = new Map<number, string>();
   let i = 0;
   while (i < txt.length) {
     const spaceIdx = txt.indexOf(" ", i);
+    if (spaceIdx === -1) break;
     const nlIdx = txt.indexOf("\n", spaceIdx);
     const end = nlIdx === -1 ? txt.length : nlIdx;
     const cp = parseInt(txt.slice(i, spaceIdx), 16);
-    const name = txt.slice(spaceIdx + 1, end);
-    _nameMap.set(cp, name);
+    if (!Number.isNaN(cp)) {
+      const name = txt.slice(spaceIdx + 1, end);
+      map.set(cp, name);
+    }
     i = end + 1;
   }
+  return map;
+}
+
+function getNameMap(): Map<number, string> {
+  if (_nameMap) return _nameMap;
+  // Cache an empty map before the read so a failure is not retried on every
+  // subsequent lookup -- names degrade to undefined, detection keeps working.
+  _nameMap = new Map();
+  let txt: string;
+  try {
+    txt = fs.readFileSync(
+      path.join(__dirname, "../../resources/unicode-names.txt"),
+      "utf8",
+    );
+  } catch (err) {
+    logError("getNameMap", err);
+    return _nameMap;
+  }
+  _nameMap = parseNameTable(txt);
   return _nameMap;
 }
 

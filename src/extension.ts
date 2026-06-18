@@ -8,11 +8,11 @@ import {
 } from "./commands";
 import {
   ExtensionConfig,
-  getCharacterSeverity,
   getConfig,
   invalidateConfig,
   invalidateConfigCache,
 } from "./config";
+import { buildLineDiagnostics } from "./diagnostics";
 import {
   clearDecorations,
   disposeDecorationType,
@@ -24,7 +24,6 @@ import {
   applyIncrementalChange,
   findMatchAtPosition,
   findNonAsciiCharacters,
-  formatGroupedDiagnosticMessage,
   formatHoverMarkdown,
   NonAsciiMatch,
 } from "./scanner";
@@ -180,45 +179,10 @@ function updateEditor(editor: vscode.TextEditor): void {
       matches.map(m => ({ range: m.range })),
     );
 
-    const lineGroups = new Map<number, NonAsciiMatch[]>();
-    for (const m of matches) {
-      const line = m.range.start.line;
-      let group = lineGroups.get(line);
-      if (!group) {
-        group = [];
-        lineGroups.set(line, group);
-      }
-      group.push(m);
-    }
-
-    const diagnostics: vscode.Diagnostic[] = [];
-    for (const group of lineGroups.values()) {
-      const rangeStart = group[0].range.start;
-      const rangeEnd = group[group.length - 1].range.end;
-      const range = new vscode.Range(rangeStart, rangeEnd);
-
-      // Worst (lowest enum value) severity in the group
-      let worstSeverity = vscode.DiagnosticSeverity.Information;
-      for (const m of group) {
-        const s = getCharacterSeverity(m.char, config);
-        if (s < worstSeverity) worstSeverity = s;
-      }
-
-      if (!config.diagnosticSeverities.has(worstSeverity)) continue;
-
-      const diag = new vscode.Diagnostic(
-        range,
-        formatGroupedDiagnosticMessage(
-          group,
-          config.codePointFormat,
-          config.codePointCase,
-        ),
-        worstSeverity,
-      );
-      diag.source = "Character Witness";
-      diagnostics.push(diag);
-    }
-    diagnosticCollection.set(editor.document.uri, diagnostics);
+    diagnosticCollection.set(
+      editor.document.uri,
+      buildLineDiagnostics(matches, config),
+    );
   } catch (err) {
     logError("updateEditor", err);
     clearEditor(editor);
@@ -372,6 +336,9 @@ export function activate(context: vscode.ExtensionContext): void {
         provideHover(document, position) {
           try {
             const config = getConfig(document.uri);
+            if (!config.enable) return undefined;
+            if (isIgnoredDocument(document, config.ignoredPaths))
+              return undefined;
             const matches = getCachedMatches(document, config);
             const match = findMatchAtPosition(matches, position);
             if (!match) return undefined;

@@ -42,6 +42,14 @@ vi.mock("vscode", () => ({
     Information: 2,
     Hint: 3,
   },
+  Diagnostic: class {
+    source?: string;
+    constructor(
+      public range: unknown,
+      public message: string,
+      public severity: number,
+    ) {}
+  },
   MarkdownString: class {
     constructor(public value: string) {}
   },
@@ -70,9 +78,14 @@ import {
   ExtensionConfig,
   getCharacterSeverity,
 } from "../config";
+import { buildLineDiagnostics } from "../diagnostics";
 import { handleError } from "../logger";
 import { isIgnoredDocument } from "../extension";
-import { getCharacterName, UNICODE_VERSION } from "../generated/unicode-names";
+import {
+  getCharacterName,
+  parseNameTable,
+  UNICODE_VERSION,
+} from "../generated/unicode-names";
 import { getTextRegions } from "../regions";
 import {
   applyIncrementalChange,
@@ -1647,5 +1660,164 @@ describe("handleError", () => {
         .length,
       2,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildLineDiagnostics
+// ---------------------------------------------------------------------------
+
+function makeMatch(
+  char: string,
+  line: number,
+  character: number,
+): NonAsciiMatch {
+  const pos = new vscode.Position(line, character);
+  return {
+    char,
+    codePoint: char.codePointAt(0)!,
+    hex: char.codePointAt(0)!.toString(16).padStart(4, "0"),
+    unicodeName: undefined,
+    range: new vscode.Range(pos, new vscode.Position(line, character + 1)),
+  };
+}
+
+function makeConfig(
+  severities: Set<number>,
+  overrides: [string, number][] = [],
+): ExtensionConfig {
+  return {
+    enable: true,
+    decoration: {},
+    allowedCharacters: new Set(),
+    allowedCharactersKey: "",
+    autoReplaceOnSave: false,
+    replacements: [],
+    severityOverrides: new Map(overrides),
+    includeStrings: true,
+    includeComments: true,
+    codePointFormat: "u+",
+    codePointCase: "upper",
+    ignoredPaths: [],
+    diagnosticSeverities: severities,
+    maxFileSizeBytes: Infinity,
+    isLimited: false,
+  };
+}
+
+describe("buildLineDiagnostics", () => {
+  // U+2014 EM DASH is in ERROR_LEVEL_CODEPOINTS -> Error severity
+  // U+00E9 e-with-acute is NOT -> Information severity
+  const emDash = String.fromCodePoint(0x2014);
+  const eAcute = String.fromCodePoint(0x00e9);
+
+  test("keeps enabled Info diagnostic when Error is disabled (regression for grouping bug)", () => {
+    // Old bug: both chars on same line, worst=Error, diagnosticSeverities={Info} -> drops everything.
+    // New behaviour: filter first, group survivors -> one Info diagnostic for eAcute remains.
+    const matches = [makeMatch(emDash, 0, 0), makeMatch(eAcute, 0, 2)];
+    const config = makeConfig(new Set([vscode.DiagnosticSeverity.Information]));
+    const diags = buildLineDiagnostics(matches, config);
+    assert.strictEqual(diags.length, 1);
+    assert.strictEqual(
+      diags[0].severity,
+      vscode.DiagnosticSeverity.Information,
+    );
+  });
+
+  test("keeps Error diagnostic when only Error is enabled", () => {
+    const matches = [makeMatch(emDash, 0, 0), makeMatch(eAcute, 0, 2)];
+    const config = makeConfig(new Set([vscode.DiagnosticSeverity.Error]));
+    const diags = buildLineDiagnostics(matches, config);
+    assert.strictEqual(diags.length, 1);
+    assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+  });
+
+  test("produces no diagnostic when the only char's severity is disabled", () => {
+    const matches = [makeMatch(emDash, 0, 0)];
+    const config = makeConfig(new Set([vscode.DiagnosticSeverity.Information]));
+    const diags = buildLineDiagnostics(matches, config);
+    assert.strictEqual(diags.length, 0);
+  });
+
+  test("two enabled matches on the same line -> single grouped diagnostic with worst severity", () => {
+    const matches = [makeMatch(eAcute, 0, 0), makeMatch(eAcute, 0, 3)];
+    const config = makeConfig(
+      new Set([
+        vscode.DiagnosticSeverity.Information,
+        vscode.DiagnosticSeverity.Error,
+      ]),
+    );
+    const diags = buildLineDiagnostics(matches, config);
+    assert.strictEqual(diags.length, 1);
+    assert.strictEqual(
+      diags[0].severity,
+      vscode.DiagnosticSeverity.Information,
+    );
+    assert.ok(diags[0].message.includes("2 non-ASCII"), diags[0].message);
+  });
+
+  test("matches on different lines -> one diagnostic per line", () => {
+    const matches = [makeMatch(emDash, 0, 0), makeMatch(eAcute, 1, 0)];
+    const config = makeConfig(
+      new Set([
+        vscode.DiagnosticSeverity.Error,
+        vscode.DiagnosticSeverity.Information,
+      ]),
+    );
+    const diags = buildLineDiagnostics(matches, config);
+    assert.strictEqual(diags.length, 2);
+  });
+
+  test("diagnostic source is 'Character Witness'", () => {
+    const matches = [makeMatch(eAcute, 0, 0)];
+    const config = makeConfig(new Set([vscode.DiagnosticSeverity.Information]));
+    const diags = buildLineDiagnostics(matches, config);
+    assert.strictEqual(diags[0].source, "Character Witness");
+  });
+
+  test("empty matches -> no diagnostics", () => {
+    const config = makeConfig(
+      new Set([
+        vscode.DiagnosticSeverity.Error,
+        vscode.DiagnosticSeverity.Information,
+      ]),
+    );
+    const diags = buildLineDiagnostics([], config);
+    assert.strictEqual(diags.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseNameTable
+// ---------------------------------------------------------------------------
+
+describe("parseNameTable", () => {
+  test("parses well-formed multi-line input", () => {
+    const txt = "00E9 LATIN SMALL LETTER E WITH ACUTE\n2014 EM DASH\n";
+    const map = parseNameTable(txt);
+    assert.strictEqual(map.get(0x00e9), "LATIN SMALL LETTER E WITH ACUTE");
+    assert.strictEqual(map.get(0x2014), "EM DASH");
+    assert.strictEqual(map.size, 2);
+  });
+
+  test("parses a trailing line without a trailing newline", () => {
+    const txt = "00E9 LATIN SMALL LETTER E WITH ACUTE";
+    const map = parseNameTable(txt);
+    assert.strictEqual(map.get(0x00e9), "LATIN SMALL LETTER E WITH ACUTE");
+  });
+
+  test("stops cleanly on a malformed line with no space -- no NaN key", () => {
+    const txt = "00E9 LATIN SMALL LETTER E WITH ACUTE\nBADLINE\n";
+    const map = parseNameTable(txt);
+    assert.strictEqual(map.get(0x00e9), "LATIN SMALL LETTER E WITH ACUTE");
+    for (const key of map.keys()) {
+      assert.ok(!Number.isNaN(key), `NaN key found in map`);
+    }
+  });
+
+  test("hex parsing is case-insensitive for the code point field", () => {
+    const txt = "2014 EM DASH\n";
+    const map = parseNameTable(txt);
+    assert.strictEqual(map.get(0x2014), "EM DASH");
   });
 });
