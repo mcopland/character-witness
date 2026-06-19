@@ -19,3 +19,4 @@ jobs:
       - run: npm run test:unit
       - run: npm run package
       - run: xvfb-run -a npm run test:integration
+        timeout-minutes: 10
