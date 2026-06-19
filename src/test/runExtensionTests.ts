@@ -15,11 +15,8 @@ export async function run(): Promise<void> {
     }
   }
   const passed = tests.length - failed;
-  const summary = `Extension Tests: ${passed} passed, ${failed} failed.`;
+  console.log(`Extension Tests: ${passed} passed, ${failed} failed.`);
   if (failed > 0) {
-    await vscode.window.showErrorMessage(summary, "Close");
     throw new Error(`${failed} test(s) failed.`);
-  } else {
-    await vscode.window.showInformationMessage(summary, "Close");
   }
 }
