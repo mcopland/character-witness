@@ -76,7 +76,7 @@ function computeFingerprint(
   document: vscode.TextDocument,
   config: ExtensionConfig,
 ): string {
-  return `${config.allowedCharactersKey}|${config.includeStrings}|${config.includeComments}|${document.languageId}|${config.maxFileSizeBytes}`;
+  return `${config.allowedCharactersKey}|${config.includeStrings}|${config.includeComments}|${document.languageId}|${config.maxFileSizeCodeUnits}`;
 }
 
 function getCachedMatches(
@@ -102,7 +102,7 @@ function getCachedMatches(
     config.includeStrings,
     config.includeComments,
     document.languageId,
-    config.maxFileSizeBytes,
+    config.maxFileSizeCodeUnits,
   );
   touchCacheEntry(key, { version: document.version, fingerprint, matches });
   return matches;
@@ -114,7 +114,7 @@ function canIncrementalUpdate(
 ): boolean {
   if (document.lineCount < INCREMENTAL_THRESHOLD_LINES) return false;
   if (!config.includeStrings || !config.includeComments) return false;
-  if (document.getText().length > config.maxFileSizeBytes) return false;
+  if (document.getText().length > config.maxFileSizeCodeUnits) return false;
   return true;
 }
 
@@ -300,9 +300,9 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!config.enable) return;
         if (isIgnoredDocument(event.document, config.ignoredPaths)) return;
         const textLen = event.document.getText().length;
-        if (textLen > config.maxFileSizeBytes) {
+        if (textLen > config.maxFileSizeCodeUnits) {
           log(
-            `skipping auto-replace: ${event.document.uri.fsPath} exceeds maxFileSizeKb (${textLen} > ${config.maxFileSizeBytes})`,
+            `skipping auto-replace: ${event.document.uri.fsPath} exceeds maxFileSizeKb (${textLen} code units > ${config.maxFileSizeCodeUnits})`,
           );
           return;
         }
@@ -319,12 +319,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.workspace.onDidCloseTextDocument(document => {
-      diagnosticCollection.delete(document.uri);
-      scanCache.delete(document.uri.toString());
-      invalidateConfig(document.uri);
-      if (debounceTimer) {
-        clearTimeout(debounceTimer);
-        debounceTimer = undefined;
+      try {
+        diagnosticCollection.delete(document.uri);
+        scanCache.delete(document.uri.toString());
+        invalidateConfig(document.uri);
+        // Do not clear debounceTimer here: it is shared across all editors,
+        // so cancelling it when any document closes would silently drop a
+        // pending rescan for the active editor. The scheduleUpdate callback
+        // already guards against closed/inactive editors.
+      } catch (err) {
+        handleError("onDidCloseTextDocument", err);
       }
     }),
   );

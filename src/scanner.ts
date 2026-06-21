@@ -217,11 +217,11 @@ export function findNonAsciiCharacters(
   includeStrings: boolean = true,
   includeComments: boolean = true,
   languageId: string = "plaintext",
-  maxFileSizeBytes: number = Number.POSITIVE_INFINITY,
+  maxFileSizeCodeUnits: number = Number.POSITIVE_INFINITY,
 ): NonAsciiMatch[] {
   const text = document.getText();
 
-  if (text.length > maxFileSizeBytes) {
+  if (text.length > maxFileSizeCodeUnits) {
     return [];
   }
 

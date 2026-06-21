@@ -63,6 +63,9 @@ vi.mock("vscode", () => ({
     activeTextEditor: undefined as unknown,
     showInformationMessage: vi.fn().mockResolvedValue(undefined),
     showErrorMessage: vi.fn().mockResolvedValue(undefined),
+    createTextEditorDecorationType: vi
+      .fn()
+      .mockReturnValue({ dispose: vi.fn() }),
   },
 }));
 
@@ -78,6 +81,11 @@ import {
   ExtensionConfig,
   getCharacterSeverity,
 } from "../config";
+import {
+  disposeDecorationType,
+  ensureDecorationType,
+  resetDecorationKey,
+} from "../decoration";
 import { buildLineDiagnostics } from "../diagnostics";
 import { handleError } from "../logger";
 import { isIgnoredDocument } from "../extension";
@@ -140,6 +148,13 @@ describe("parseCharacterEntry", () => {
     assert.strictEqual(parseCharacterEntry("hello"), undefined);
     assert.strictEqual(parseCharacterEntry("\\xA3"), undefined);
   });
+
+  test("out-of-range code point (u+ffffff) returns undefined", () =>
+    assert.strictEqual(parseCharacterEntry("u+ffffff"), undefined));
+  test("out-of-range code point (0x110000) returns undefined", () =>
+    assert.strictEqual(parseCharacterEntry("0x110000"), undefined));
+  test("out-of-range code point (\\u{ffffff}) returns undefined", () =>
+    assert.strictEqual(parseCharacterEntry("\\u{ffffff}"), undefined));
 });
 
 describe("parseCharacterEntries", () => {
@@ -912,7 +927,7 @@ describe("findNonAsciiCharacters", () => {
     assert.strictEqual(matches.length, 0);
   });
 
-  test("returns empty when text exceeds maxFileSizeBytes", () => {
+  test("returns empty when text exceeds maxFileSizeCodeUnits", () => {
     const doc = mockDocument("hello \u2019 world");
     const matches = findNonAsciiCharacters(
       doc,
@@ -925,7 +940,7 @@ describe("findNonAsciiCharacters", () => {
     assert.strictEqual(matches.length, 0);
   });
 
-  test("scans normally when text is within maxFileSizeBytes", () => {
+  test("scans normally when text is within maxFileSizeCodeUnits", () => {
     const doc = mockDocument("hello \u2019 world");
     const matches = findNonAsciiCharacters(
       doc,
@@ -938,7 +953,7 @@ describe("findNonAsciiCharacters", () => {
     assert.strictEqual(matches.length, 1);
   });
 
-  test("treats POSITIVE_INFINITY maxFileSizeBytes as unlimited", () => {
+  test("treats POSITIVE_INFINITY maxFileSizeCodeUnits as unlimited", () => {
     const doc = mockDocument("hello \u2019 world");
     const matches = findNonAsciiCharacters(
       doc,
@@ -1700,7 +1715,7 @@ function makeConfig(
     codePointCase: "upper",
     ignoredPaths: [],
     diagnosticSeverities: severities,
-    maxFileSizeBytes: Infinity,
+    maxFileSizeCodeUnits: Infinity,
     isLimited: false,
   };
 }
@@ -1784,6 +1799,41 @@ describe("buildLineDiagnostics", () => {
     );
     const diags = buildLineDiagnostics([], config);
     assert.strictEqual(diags.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ensureDecorationType
+// ---------------------------------------------------------------------------
+
+describe("ensureDecorationType", () => {
+  beforeEach(() => {
+    disposeDecorationType();
+    resetDecorationKey();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    disposeDecorationType();
+    resetDecorationKey();
+  });
+
+  test("falls back to default decoration if createTextEditorDecorationType throws", () => {
+    const fallbackType = { dispose: vi.fn() };
+    const createDecoMock = vscode.window
+      .createTextEditorDecorationType as ReturnType<typeof vi.fn>;
+    createDecoMock
+      .mockImplementationOnce(() => {
+        throw new Error("bad style value");
+      })
+      .mockImplementationOnce(() => fallbackType);
+
+    vi.spyOn(configModule, "getConfig").mockReturnValue({
+      decoration: { backgroundColor: "notacolor" },
+    } as unknown as ExtensionConfig);
+
+    const result = ensureDecorationType();
+    assert.strictEqual(result, fallbackType);
   });
 });
 

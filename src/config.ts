@@ -8,7 +8,7 @@ import {
   parseCharacterGroup,
 } from "./utils";
 
-const DEFAULT_DECORATION: Record<string, string> = {
+export const DEFAULT_DECORATION: Record<string, string> = {
   backgroundColor: "rgba(125, 249, 255, 0.2)",
   borderColor: "rgba(125, 249, 255, 0.1)",
   borderRadius: "4px",
@@ -82,7 +82,7 @@ export interface ExtensionConfig {
   codePointCase: string;
   ignoredPaths: Minimatch[];
   diagnosticSeverities: Set<vscode.DiagnosticSeverity>;
-  maxFileSizeBytes: number;
+  maxFileSizeCodeUnits: number;
   isLimited: boolean;
 }
 
@@ -182,7 +182,7 @@ function readConfig(resource?: vscode.Uri): ExtensionConfig {
   }
 
   const maxKb = cfg.get<number>("maxFileSizeKb", 10240);
-  const maxFileSizeBytes = maxKb > 0 ? maxKb * 1024 : Number.POSITIVE_INFINITY;
+  const maxFileSizeCodeUnits = maxKb > 0 ? maxKb * 1024 : Number.POSITIVE_INFINITY;
 
   return {
     enable: cfg.get<boolean>("enable", true),
@@ -200,7 +200,7 @@ function readConfig(resource?: vscode.Uri): ExtensionConfig {
       ? compileIgnoredPaths(cfg.get<string[]>("ignoredPaths", []))
       : [],
     diagnosticSeverities,
-    maxFileSizeBytes,
+    maxFileSizeCodeUnits,
     isLimited: !trusted,
   };
 }
