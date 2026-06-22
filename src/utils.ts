@@ -12,26 +12,35 @@ import { log } from "./logger";
  * Returns the single character (possibly a surrogate pair), or undefined if
  * the input is not recognizable.
  */
+// Guard against String.fromCodePoint throwing RangeError on values that
+// exceed the Unicode maximum (U+10FFFF). Returns undefined for out-of-range
+// inputs so callers can skip them gracefully, matching the pattern used
+// elsewhere in the codebase (e.g. parseNameTable).
+function fromCodePointSafe(cp: number): string | undefined {
+  if (!Number.isInteger(cp) || cp < 0 || cp > 0x10ffff) return undefined;
+  return String.fromCodePoint(cp);
+}
+
 export function parseCharacterEntry(raw: string): string | undefined {
   // u+HHHH or U+HHHH
   const uPlus = raw.match(/^[Uu]\+([0-9a-fA-F]{4,6})$/);
   if (uPlus) {
-    return String.fromCodePoint(parseInt(uPlus[1], 16));
+    return fromCodePointSafe(parseInt(uPlus[1], 16));
   }
   // \uHHHH (exactly 4 hex digits)
   const backslashU = raw.match(/^\\u([0-9a-fA-F]{4})$/);
   if (backslashU) {
-    return String.fromCodePoint(parseInt(backslashU[1], 16));
+    return fromCodePointSafe(parseInt(backslashU[1], 16));
   }
   // \u{HHHH}
   const backslashUBrace = raw.match(/^\\u\{([0-9a-fA-F]{1,6})\}$/);
   if (backslashUBrace) {
-    return String.fromCodePoint(parseInt(backslashUBrace[1], 16));
+    return fromCodePointSafe(parseInt(backslashUBrace[1], 16));
   }
   // 0xHHHH (0x or 0X prefix)
   const hex0x = raw.match(/^0[xX]([0-9a-fA-F]{4,6})$/);
   if (hex0x) {
-    return String.fromCodePoint(parseInt(hex0x[1], 16));
+    return fromCodePointSafe(parseInt(hex0x[1], 16));
   }
   return undefined;
 }
