@@ -13,7 +13,7 @@ vi.mock("vscode", () => ({
       public end: { line: number; character: number },
     ) {}
   },
-  Position: class {
+  Position: class Position {
     constructor(
       public line: number,
       public character: number,
@@ -25,6 +25,12 @@ vi.mock("vscode", () => ({
     isBefore(other: { line: number; character: number }): boolean {
       if (this.line !== other.line) return this.line < other.line;
       return this.character < other.character;
+    }
+    translate(lineDelta = 0, characterDelta = 0): Position {
+      return new Position(
+        this.line + lineDelta,
+        this.character + characterDelta,
+      );
     }
   },
   Selection: class {
@@ -74,7 +80,14 @@ vi.mock("vscode", () => ({
 // Run with:  npx vitest run
 // ---------------------------------------------------------------------------
 
-import { addToAllowedCharacters, goToNextNonAsciiCharacter } from "../commands";
+import {
+  addToAllowedCharacters,
+  appendMissingEntries,
+  collectNonAsciiFromSelections,
+  formatCharEntries,
+  goToNextNonAsciiCharacter,
+  parseEntryChars,
+} from "../commands";
 import * as configModule from "../config";
 import {
   compileIgnoredPaths,
@@ -1894,6 +1907,150 @@ describe("addToAllowedCharacters", () => {
       writtenEntries.includes("U+00A9"),
       `expected "U+00A9" in ${JSON.stringify(writtenEntries)}`,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// addToAllowedCharacters pure helpers
+// ---------------------------------------------------------------------------
+
+// Single-line document stub; ranges are interpreted as character offsets.
+function lineDocument(text: string): Pick<vscode.TextDocument, "getText"> {
+  return {
+    getText: (range?: vscode.Range) => {
+      if (!range) return text;
+      return text.slice(range.start.character, range.end.character);
+    },
+  };
+}
+
+function sel(startCh: number, endCh: number): vscode.Selection {
+  const start = new vscode.Position(0, startCh);
+  const end = new vscode.Position(0, endCh);
+  return {
+    isEmpty: startCh === endCh,
+    anchor: start,
+    active: startCh === endCh ? start : end,
+    start,
+    end,
+  } as unknown as vscode.Selection;
+}
+
+describe("collectNonAsciiFromSelections", () => {
+  const EMOJI = String.fromCodePoint(0x1f600);
+
+  test("collects all non-ASCII characters in a selection, skipping ASCII", () => {
+    const doc = lineDocument(`a${E_ACUTE}b${N_TILDE}c`);
+    const chars = collectNonAsciiFromSelections(doc, [sel(0, 5)], new Set());
+    assert.deepStrictEqual([...chars].sort(), [E_ACUTE, N_TILDE].sort());
+  });
+
+  test("skips characters already in the allowed set", () => {
+    const doc = lineDocument(`a${E_ACUTE}b${N_TILDE}c`);
+    const chars = collectNonAsciiFromSelections(
+      doc,
+      [sel(0, 5)],
+      new Set([E_ACUTE]),
+    );
+    assert.deepStrictEqual([...chars], [N_TILDE]);
+  });
+
+  test("empty selection picks the character at the cursor", () => {
+    const doc = lineDocument(`a${E_ACUTE}b`);
+    const chars = collectNonAsciiFromSelections(doc, [sel(1, 1)], new Set());
+    assert.deepStrictEqual([...chars], [E_ACUTE]);
+  });
+
+  test("cursor on a surrogate-pair lead captures the full pair", () => {
+    const doc = lineDocument(`a${EMOJI}b`);
+    const chars = collectNonAsciiFromSelections(doc, [sel(1, 1)], new Set());
+    assert.deepStrictEqual([...chars], [EMOJI]);
+  });
+
+  test("cursor at end of document yields nothing", () => {
+    const doc = lineDocument("ab");
+    const chars = collectNonAsciiFromSelections(doc, [sel(2, 2)], new Set());
+    assert.strictEqual(chars.size, 0);
+  });
+
+  test("cursor on an ASCII character yields nothing", () => {
+    const doc = lineDocument(`a${E_ACUTE}b`);
+    const chars = collectNonAsciiFromSelections(doc, [sel(0, 0)], new Set());
+    assert.strictEqual(chars.size, 0);
+  });
+
+  test("deduplicates across multiple selections", () => {
+    const doc = lineDocument(`${E_ACUTE}a${E_ACUTE}`);
+    const chars = collectNonAsciiFromSelections(
+      doc,
+      [sel(0, 1), sel(2, 3)],
+      new Set(),
+    );
+    assert.deepStrictEqual([...chars], [E_ACUTE]);
+  });
+});
+
+describe("parseEntryChars", () => {
+  test("parses mixed notations into characters", () => {
+    const chars = parseEntryChars(["u+00e9", "0x00F1", "\\u00a3"]);
+    assert.deepStrictEqual(
+      [...chars].sort(),
+      [E_ACUTE, N_TILDE, String.fromCodePoint(0xa3)].sort(),
+    );
+  });
+
+  test("skips unparseable entries", () => {
+    const chars = parseEntryChars(["bogus", "", "u+00e9"]);
+    assert.deepStrictEqual([...chars], [E_ACUTE]);
+  });
+});
+
+describe("appendMissingEntries", () => {
+  test("appends only entries whose character is not already present", () => {
+    const { merged, added } = appendMissingEntries(
+      ["u+00e9"],
+      ["U+00F1", "U+00A3"],
+    );
+    assert.deepStrictEqual(added, ["U+00F1", "U+00A3"]);
+    assert.deepStrictEqual(merged, ["u+00e9", "U+00F1", "U+00A3"]);
+  });
+
+  test("detects duplicates across different notations", () => {
+    const { merged, added } = appendMissingEntries(["u+00e9"], ["0x00E9"]);
+    assert.deepStrictEqual(added, []);
+    assert.deepStrictEqual(merged, ["u+00e9"]);
+  });
+
+  test("does not append the same character twice from the candidate list", () => {
+    const { added } = appendMissingEntries([], ["U+00F1", "0x00f1"]);
+    assert.deepStrictEqual(added, ["U+00F1"]);
+  });
+
+  test("skips unparseable candidates and preserves existing order", () => {
+    const { merged, added } = appendMissingEntries(
+      ["u+00e9", "u+00a3"],
+      ["bogus", "U+00F1"],
+    );
+    assert.deepStrictEqual(added, ["U+00F1"]);
+    assert.deepStrictEqual(merged, ["u+00e9", "u+00a3", "U+00F1"]);
+  });
+});
+
+describe("formatCharEntries", () => {
+  test("respects codePointFormat and codePointCase", () => {
+    assert.deepStrictEqual(formatCharEntries([E_ACUTE], "0x", "upper"), [
+      "0x00E9",
+    ]);
+    assert.deepStrictEqual(formatCharEntries([E_ACUTE], "u+", "lower"), [
+      "u+00e9",
+    ]);
+  });
+
+  test("formats supplementary-plane characters with full hex", () => {
+    const EMOJI = String.fromCodePoint(0x1f600);
+    assert.deepStrictEqual(formatCharEntries([EMOJI], "u+", "upper"), [
+      "U+1F600",
+    ]);
   });
 });
 
