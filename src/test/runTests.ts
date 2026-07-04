@@ -3,7 +3,9 @@ import { runTests } from "@vscode/test-electron";
 
 async function main() {
   const extensionDevelopmentPath = path.resolve(__dirname, "../..");
-  const extensionTestsPath = path.resolve(__dirname, "./runExtensionTests");
+  const suite =
+    process.argv[2] === "perf" ? "runPerfTests" : "runExtensionTests";
+  const extensionTestsPath = path.resolve(__dirname, `./${suite}`);
   await runTests({ extensionDevelopmentPath, extensionTestsPath });
 }
 
