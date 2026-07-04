@@ -46,14 +46,12 @@ export class ScanCache {
       return cached.matches;
     }
 
-    const matches = findNonAsciiCharacters(
-      document,
-      config.allowedCharacters,
-      config.includeStrings,
-      config.includeComments,
-      document.languageId,
-      config.maxFileSizeCodeUnits,
-    );
+    const matches = findNonAsciiCharacters(document, config.allowedCharacters, {
+      includeStrings: config.includeStrings,
+      includeComments: config.includeComments,
+      languageId: document.languageId,
+      maxFileSizeCodeUnits: config.maxFileSizeCodeUnits,
+    });
     this.touch(key, { version: document.version, fingerprint, matches });
     return matches;
   }

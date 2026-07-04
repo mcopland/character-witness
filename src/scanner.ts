@@ -205,6 +205,18 @@ export function formatHoverMarkdown(
   return new vscode.MarkdownString(parts.join("  \n"));
 }
 
+/** Options for `findNonAsciiCharacters`. */
+export interface ScanOptions {
+  /** Include characters inside string literals. Default true. */
+  includeStrings?: boolean;
+  /** Include characters inside comments. Default true. */
+  includeComments?: boolean;
+  /** Language used for string/comment region detection. Default "plaintext". */
+  languageId?: string;
+  /** Skip scanning entirely for longer documents. Default unlimited. */
+  maxFileSizeCodeUnits?: number;
+}
+
 /**
  * Scan a document for non-ASCII characters (code point > 127) that are not in
  * `allowedCharacters`. Returns one `NonAsciiMatch` per character, in document
@@ -214,11 +226,14 @@ export function formatHoverMarkdown(
 export function findNonAsciiCharacters(
   document: vscode.TextDocument,
   allowedCharacters: Set<string>,
-  includeStrings: boolean = true,
-  includeComments: boolean = true,
-  languageId: string = "plaintext",
-  maxFileSizeCodeUnits: number = Number.POSITIVE_INFINITY,
+  options: ScanOptions = {},
 ): NonAsciiMatch[] {
+  const {
+    includeStrings = true,
+    includeComments = true,
+    languageId = "plaintext",
+    maxFileSizeCodeUnits = Number.POSITIVE_INFINITY,
+  } = options;
   const text = document.getText();
 
   if (text.length > maxFileSizeCodeUnits) {
@@ -230,14 +245,12 @@ export function findNonAsciiCharacters(
     regions = getTextRegions(text, languageId);
   }
 
-  return scanText(
-    text,
-    allowedCharacters,
+  return scanText(text, allowedCharacters, {
     regions,
     includeStrings,
     includeComments,
-    0,
-  );
+    startLine: 0,
+  });
 }
 
 /**
@@ -258,7 +271,18 @@ export function findNonAsciiCharactersInLineRange(
   const endPos = document.lineAt(lastLine).range.end;
   const text = document.getText(new vscode.Range(startPos, endPos));
 
-  return scanText(text, allowedCharacters, undefined, true, true, startLine);
+  return scanText(text, allowedCharacters, {
+    includeStrings: true,
+    includeComments: true,
+    startLine,
+  });
+}
+
+interface ScanTextOptions {
+  regions?: TextRegion[];
+  includeStrings: boolean;
+  includeComments: boolean;
+  startLine: number;
 }
 
 /**
@@ -269,11 +293,9 @@ export function findNonAsciiCharactersInLineRange(
 function scanText(
   text: string,
   allowedCharacters: Set<string>,
-  regions: TextRegion[] | undefined,
-  includeStrings: boolean,
-  includeComments: boolean,
-  startLine: number,
+  options: ScanTextOptions,
 ): NonAsciiMatch[] {
+  const { regions, includeStrings, includeComments, startLine } = options;
   const matches: NonAsciiMatch[] = [];
   const len = text.length;
   let i = 0;

@@ -892,37 +892,29 @@ describe("findNonAsciiCharacters", () => {
 
   test("includeStrings=false skips characters in strings", () => {
     const doc = mockDocument('const x = "\u00e9";', "javascript");
-    const matches = findNonAsciiCharacters(
-      doc,
-      new Set(),
-      false,
-      true,
-      "javascript",
-    );
+    const matches = findNonAsciiCharacters(doc, new Set(), {
+      includeStrings: false,
+      languageId: "javascript",
+    });
     assert.strictEqual(matches.length, 0);
   });
 
   test("includeComments=false skips characters in comments", () => {
     const doc = mockDocument("// \u00e9", "javascript");
-    const matches = findNonAsciiCharacters(
-      doc,
-      new Set(),
-      true,
-      false,
-      "javascript",
-    );
+    const matches = findNonAsciiCharacters(doc, new Set(), {
+      includeComments: false,
+      languageId: "javascript",
+    });
     assert.strictEqual(matches.length, 0);
   });
 
   test("characters outside strings/comments found even when filters active", () => {
     const doc = mockDocument('const \u00e9 = "\u00f1";', "javascript");
-    const matches = findNonAsciiCharacters(
-      doc,
-      new Set(),
-      false,
-      false,
-      "javascript",
-    );
+    const matches = findNonAsciiCharacters(doc, new Set(), {
+      includeStrings: false,
+      includeComments: false,
+      languageId: "javascript",
+    });
     assert.strictEqual(matches.length, 1);
     assert.strictEqual(matches[0].char, "\u00e9");
   });
@@ -935,40 +927,25 @@ describe("findNonAsciiCharacters", () => {
 
   test("returns empty when text exceeds maxFileSizeCodeUnits", () => {
     const doc = mockDocument("hello \u2019 world");
-    const matches = findNonAsciiCharacters(
-      doc,
-      new Set(),
-      true,
-      true,
-      "plaintext",
-      5,
-    );
+    const matches = findNonAsciiCharacters(doc, new Set(), {
+      maxFileSizeCodeUnits: 5,
+    });
     assert.strictEqual(matches.length, 0);
   });
 
   test("scans normally when text is within maxFileSizeCodeUnits", () => {
     const doc = mockDocument("hello \u2019 world");
-    const matches = findNonAsciiCharacters(
-      doc,
-      new Set(),
-      true,
-      true,
-      "plaintext",
-      1024,
-    );
+    const matches = findNonAsciiCharacters(doc, new Set(), {
+      maxFileSizeCodeUnits: 1024,
+    });
     assert.strictEqual(matches.length, 1);
   });
 
   test("treats POSITIVE_INFINITY maxFileSizeCodeUnits as unlimited", () => {
     const doc = mockDocument("hello \u2019 world");
-    const matches = findNonAsciiCharacters(
-      doc,
-      new Set(),
-      true,
-      true,
-      "plaintext",
-      Number.POSITIVE_INFINITY,
-    );
+    const matches = findNonAsciiCharacters(doc, new Set(), {
+      maxFileSizeCodeUnits: Number.POSITIVE_INFINITY,
+    });
     assert.strictEqual(matches.length, 1);
   });
 });
