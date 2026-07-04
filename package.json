@@ -228,7 +228,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "Array of glob patterns matched against the file's full path (forward slashes, cross-platform). Files with a matching path are excluded from scanning, decorations, diagnostics, and auto-replace.",
+          "description": "Array of glob patterns matched against the file's path relative to its workspace folder (or the absolute path for files outside a workspace), using forward slashes on all platforms. Files with a matching path are excluded from scanning, decorations, diagnostics, and auto-replace.",
           "examples": [
             [
               "**/node_modules/**",

@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Incremental scanning falls back to a full rescan for edit events with multiple content changes (multi-cursor edits on large documents could corrupt match positions until the next full scan)
+- Duplicate error notifications are now throttled per message; alternating errors can no longer bypass the 10-second suppression window
+
+### Changed
+
+- Formatting check and a non-blocking `npm audit` added to CI; performance tests are runnable via `npm run test:perf`
+
+## [1.6.0]
+
+### Added
+
+- `maxFileSizeKb` setting — skip scanning and auto-replace for oversized files (default 10240 KB, 0 disables)
+- Incremental scanning for documents with 5,000+ lines — only the changed line range is rescanned while typing
+- LRU scan-result cache (up to 50 documents)
+- Workspace Trust support (limited mode) — auto-replace, the replacement map, and ignored-paths globs are disabled in untrusted workspaces
+
+## [1.5.0]
+
+### Added
+
+- `replacementMap` keys accept ranges (`"u+201c - u+201d"`) and comma-separated lists (`"u+2018, u+2019"`)
+- Most settings are language-overridable via `"[languageId]"` configuration blocks
+
 ## [1.4.0]
 
 ### Added
