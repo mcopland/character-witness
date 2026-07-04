@@ -20,37 +20,25 @@ import {
   resetDecorationKey,
 } from "./decoration";
 import { handleError, initOutputChannel, log, logError } from "./logger";
+import { ScanCache } from "./scancache";
 import {
-  applyIncrementalChange,
   findMatchAtPosition,
-  findNonAsciiCharacters,
   formatHoverMarkdown,
   NonAsciiMatch,
 } from "./scanner";
+import { debounce } from "./utils";
 
 let diagnosticCollection: vscode.DiagnosticCollection;
-let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 const DEBOUNCE_MS = 250;
-const SCAN_CACHE_CAP = 50;
-const INCREMENTAL_THRESHOLD_LINES = 5000;
 
-interface ScanCacheEntry {
-  version: number;
-  fingerprint: string;
-  matches: NonAsciiMatch[];
-}
+const scanCache = new ScanCache();
 
-const scanCache = new Map<string, ScanCacheEntry>();
-
-function touchCacheEntry(key: string, entry: ScanCacheEntry): void {
-  // Map preserves insertion order; delete + set moves to MRU position.
-  scanCache.delete(key);
-  scanCache.set(key, entry);
-  if (scanCache.size > SCAN_CACHE_CAP) {
-    const oldest = scanCache.keys().next().value;
-    if (oldest !== undefined) scanCache.delete(oldest);
-  }
+function getCachedMatches(
+  document: vscode.TextDocument,
+  config: ExtensionConfig,
+): NonAsciiMatch[] {
+  return scanCache.getCachedMatches(document, config);
 }
 
 /**
@@ -70,85 +58,6 @@ export function isIgnoredDocument(
       )
     : normalized;
   return ignoredPaths.some(m => m.match(testPath));
-}
-
-function computeFingerprint(
-  document: vscode.TextDocument,
-  config: ExtensionConfig,
-): string {
-  return `${config.allowedCharactersKey}|${config.includeStrings}|${config.includeComments}|${document.languageId}|${config.maxFileSizeCodeUnits}`;
-}
-
-function getCachedMatches(
-  document: vscode.TextDocument,
-  config: ExtensionConfig,
-): NonAsciiMatch[] {
-  const key = document.uri.toString();
-  const fingerprint = computeFingerprint(document, config);
-  const cached = scanCache.get(key);
-
-  if (
-    cached &&
-    cached.version === document.version &&
-    cached.fingerprint === fingerprint
-  ) {
-    touchCacheEntry(key, cached);
-    return cached.matches;
-  }
-
-  const matches = findNonAsciiCharacters(
-    document,
-    config.allowedCharacters,
-    config.includeStrings,
-    config.includeComments,
-    document.languageId,
-    config.maxFileSizeCodeUnits,
-  );
-  touchCacheEntry(key, { version: document.version, fingerprint, matches });
-  return matches;
-}
-
-function canIncrementalUpdate(
-  document: vscode.TextDocument,
-  config: ExtensionConfig,
-): boolean {
-  if (document.lineCount < INCREMENTAL_THRESHOLD_LINES) return false;
-  if (!config.includeStrings || !config.includeComments) return false;
-  if (document.getText().length > config.maxFileSizeCodeUnits) return false;
-  return true;
-}
-
-function tryIncrementalUpdate(
-  event: vscode.TextDocumentChangeEvent,
-  config: ExtensionConfig,
-): boolean {
-  if (!canIncrementalUpdate(event.document, config)) return false;
-  if (event.contentChanges.length === 0) return false;
-
-  const key = event.document.uri.toString();
-  const cached = scanCache.get(key);
-  if (!cached) return false;
-
-  const fingerprint = computeFingerprint(event.document, config);
-  if (cached.fingerprint !== fingerprint) return false;
-  if (cached.version !== event.document.version - 1) return false;
-
-  let matches = cached.matches;
-  for (const change of event.contentChanges) {
-    matches = applyIncrementalChange(
-      matches,
-      event.document,
-      change,
-      config.allowedCharacters,
-    );
-  }
-
-  touchCacheEntry(key, {
-    version: event.document.version,
-    fingerprint,
-    matches,
-  });
-  return true;
 }
 
 function updateEditor(editor: vscode.TextEditor): void {
@@ -194,16 +103,11 @@ function clearEditor(editor: vscode.TextEditor): void {
   diagnosticCollection.delete(editor.document.uri);
 }
 
-function scheduleUpdate(editor: vscode.TextEditor): void {
-  if (debounceTimer) {
-    clearTimeout(debounceTimer);
-  }
-  debounceTimer = setTimeout(() => {
-    if (editor.document.isClosed) return;
-    if (editor !== vscode.window.activeTextEditor) return;
-    updateEditor(editor);
-  }, DEBOUNCE_MS);
-}
+const scheduleUpdate = debounce((editor: vscode.TextEditor) => {
+  if (editor.document.isClosed) return;
+  if (editor !== vscode.window.activeTextEditor) return;
+  updateEditor(editor);
+}, DEBOUNCE_MS);
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(initOutputChannel());
@@ -250,7 +154,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const editor = vscode.window.activeTextEditor;
         if (editor && event.document === editor.document) {
           const config = getConfig(event.document.uri);
-          tryIncrementalUpdate(event, config);
+          scanCache.tryIncrementalUpdate(event, config);
           scheduleUpdate(editor);
         }
       } catch (err) {
@@ -323,10 +227,11 @@ export function activate(context: vscode.ExtensionContext): void {
         diagnosticCollection.delete(document.uri);
         scanCache.delete(document.uri.toString());
         invalidateConfig(document.uri);
-        // Do not clear debounceTimer here: it is shared across all editors,
-        // so cancelling it when any document closes would silently drop a
-        // pending rescan for the active editor. The scheduleUpdate callback
-        // already guards against closed/inactive editors.
+        // Do not cancel the pending debounced update here: it is shared
+        // across all editors, so cancelling it when any document closes
+        // would silently drop a pending rescan for the active editor. The
+        // scheduleUpdate callback already guards against closed/inactive
+        // editors.
       } catch (err) {
         handleError("onDidCloseTextDocument", err);
       }
@@ -378,8 +283,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   log("deactivated");
-  if (debounceTimer) {
-    clearTimeout(debounceTimer);
-  }
+  scheduleUpdate.cancel();
   disposeDecorationType();
 }

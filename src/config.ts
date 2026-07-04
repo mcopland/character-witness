@@ -58,7 +58,9 @@ export interface ReplacementEntry {
   to: string;
 }
 
-function parseReplacementMap(raw: Record<string, string>): ReplacementEntry[] {
+export function parseReplacementMap(
+  raw: Record<string, string>,
+): ReplacementEntry[] {
   const entries: ReplacementEntry[] = [];
   for (const [key, value] of Object.entries(raw)) {
     for (const fromChar of parseCharacterGroup(key)) {
@@ -109,7 +111,7 @@ function parseSeverityString(
   }
 }
 
-function parseSeverityOverrides(
+export function parseSeverityOverrides(
   raw: Record<string, string>,
 ): Map<string, vscode.DiagnosticSeverity> {
   const map = new Map<string, vscode.DiagnosticSeverity>();
@@ -182,7 +184,8 @@ function readConfig(resource?: vscode.Uri): ExtensionConfig {
   }
 
   const maxKb = cfg.get<number>("maxFileSizeKb", 10240);
-  const maxFileSizeCodeUnits = maxKb > 0 ? maxKb * 1024 : Number.POSITIVE_INFINITY;
+  const maxFileSizeCodeUnits =
+    maxKb > 0 ? maxKb * 1024 : Number.POSITIVE_INFINITY;
 
   return {
     enable: cfg.get<boolean>("enable", true),

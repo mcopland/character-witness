@@ -16,7 +16,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - run: npm run format:check
       - run: npm run test:unit
       - run: npm run package
       - run: xvfb-run -a npm run test:integration
         timeout-minutes: 10
+      - run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true

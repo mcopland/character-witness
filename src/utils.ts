@@ -93,6 +93,37 @@ export function parseCharacterGroup(key: string): string[] {
   return result;
 }
 
+/** A debounced function with a handle to cancel any pending invocation. */
+export interface DebouncedFn<Args extends unknown[]> {
+  (...args: Args): void;
+  cancel(): void;
+}
+
+/**
+ * Return a trailing-edge debounced wrapper around `fn`: rapid calls are
+ * coalesced and only the last one runs, `delayMs` after the burst ends.
+ */
+export function debounce<Args extends unknown[]>(
+  fn: (...args: Args) => void,
+  delayMs: number,
+): DebouncedFn<Args> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const debounced = (...args: Args): void => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = undefined;
+      fn(...args);
+    }, delayMs);
+  };
+  debounced.cancel = (): void => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+  };
+  return debounced;
+}
+
 /**
  * Return a title-cased version of a Unicode name.
  * "EM DASH" -> "Em Dash"

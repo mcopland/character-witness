@@ -18,11 +18,15 @@ Every detected character is published as a diagnostic with its official Unicode 
 
 ### Hover Tooltips
 
-Hovering over a highlighted character shows a tooltip with its Unicode name and code point.
+Hovering over a highlighted character shows a tooltip with its Unicode name and code point, provided by a hover provider registered for `file` and `untitled` documents.
 
 ### Context Menu: Add to Allowed Characters
 
 Right-click on any highlighted character and select **Character Witness: Add to Allowed Characters** to add it to your allowed list. Works with both cursor position and text selection (all non-ASCII characters in the selection are offered). The character is added as a `U+HHHH` entry to your settings.
+
+### Navigation and On-Demand Replacement
+
+**Character Witness: Go to Next Non-ASCII Character** cycles through the detected characters in the active editor, and **Character Witness: Apply Replacements** applies the configured replacement map on demand without waiting for a save.
 
 ### Auto-Replace on Save
 
@@ -36,9 +40,17 @@ Detected characters are marked in the editor's minimap scrollbar, making it easy
 
 All character settings use `U+HHHH` notation. This prevents the settings file itself from being flagged or corrupted when auto-replace is enabled.
 
+### Workspace Trust (Limited Mode)
+
+In untrusted workspaces, auto-replace on save, the replacement map, and ignored-paths globs are disabled. Detection, highlighting, and diagnostics continue to work, and full functionality is restored automatically when the workspace is trusted.
+
+### Performance
+
+Scan results are cached per document (LRU, up to 50 documents) and invalidated on edit or configuration change. Documents with 5,000 or more lines are updated incrementally as you type — only the changed line range is rescanned — as long as strings and comments are not being filtered. Files larger than `maxFileSizeKb` are skipped entirely.
+
 ## Settings
 
-All settings are under the `characterWitness.*` namespace.
+All settings are under the `characterWitness.*` namespace. Most settings are language-overridable, so they can be set per language in a `"[languageId]"` block; the exceptions are `decoration`, `ignoredPaths`, and `maxFileSizeKb`, which apply globally.
 
 ### `characterWitness.enable`
 
@@ -74,7 +86,7 @@ Fully customizable visual style for highlighted characters.
 
 **Type:** `string[]` | **Default:** `[]`
 
-Characters to exclude from detection. Each entry uses `u+hhhh` notation (4-6 hex digits). Also accepted: `\uHHHH`, `\u{HHHH}`, and `0xHHHH`. Ranges are supported with `u+HHHH - u+HHHH` syntax. All notations are case-insensitive.
+Characters to exclude from detection. Each entry uses `u+hhhh` notation (4-6 hex digits). Also accepted: `\uHHHH`, `\u{HHHH}`, and `0xHHHH`. Ranges are supported with `u+HHHH - u+HHHH` syntax and are capped at a span of 0x4000 (16,384) code points; oversized ranges are ignored and logged. All notations are case-insensitive.
 
 ```jsonc
 "characterWitness.allowedCharacters": [
@@ -94,15 +106,13 @@ When enabled, characters found in the replacement map are automatically substitu
 
 **Type:** `object` | **Default:** `{}`
 
-Map of non-ASCII characters to their ASCII replacements. Keys use `u+hhhh` notation. Only characters present in this map are replaced on save; all others are left as-is.
+Map of non-ASCII characters to their ASCII replacements. Keys use `u+hhhh` notation and may be a single code point, a range (`"u+201c - u+201d"`), a comma-separated list (`"u+2018, u+2019"`), or any combination of the three. Only characters present in this map are replaced on save; all others are left as-is.
 
 ```jsonc
 "characterWitness.replacementMap": {
-  "u+2013": "-",   // en dash -> hyphen
-  "u+2018": "'",   // left single quote -> apostrophe
-  "u+2019": "'",   // right single quote -> apostrophe
-  "u+201c": "\"",  // left double quote -> straight double quote
-  "u+201d": "\""   // right double quote -> straight double quote
+  "u+2013": "-",             // en dash -> hyphen
+  "u+2018, u+2019": "'",     // curly single quotes -> apostrophe
+  "u+201c - u+201d": "\""    // curly double quotes -> straight double quote
 }
 ```
 
@@ -110,7 +120,7 @@ Map of non-ASCII characters to their ASCII replacements. Keys use `u+hhhh` notat
 
 **Type:** `object` | **Default:** `{}`
 
-Override the diagnostic severity for specific characters. Keys use `u+hhhh` notation, values are `"error"`, `"warning"`, or `"info"`. Characters not listed here use the built-in severity (Error for invisible/control characters, Information for all others).
+Override the diagnostic severity for specific characters. Keys use `u+hhhh` notation and must name a single code point — ranges and comma-separated lists are not supported here. Values are `"error"`, `"warning"`, or `"info"`. Characters not listed here use the built-in severity (Error for invisible/control characters and confusable fullwidth forms, Information for all others).
 
 ```jsonc
 "characterWitness.severityOverrides": {
@@ -165,7 +175,7 @@ Whether hex digits (and the `u+` prefix) are displayed in lower or uppercase.
 
 **Type:** `string[]` | **Default:** `[]`
 
-Glob patterns matched against each file's full path (forward slashes, cross-platform). Files with a matching path are excluded from scanning, decorations, diagnostics, and auto-replace.
+Glob patterns matched against each file's path relative to its workspace folder, or against the absolute path for files outside a workspace (forward slashes on all platforms). Files with a matching path are excluded from scanning, decorations, diagnostics, and auto-replace.
 
 ```jsonc
 "characterWitness.ignoredPaths": [
@@ -174,6 +184,12 @@ Glob patterns matched against each file's full path (forward slashes, cross-plat
   "{dist,build}/**"
 ]
 ```
+
+### `characterWitness.maxFileSizeKb`
+
+**Type:** `integer` | **Default:** `10240`
+
+Maximum document size to scan, in KB measured in UTF-16 code units. Files larger than this are skipped by scanning, decorations, diagnostics, and auto-replace to protect editor responsiveness. Set to `0` to disable the limit.
 
 ## Commands
 
@@ -187,8 +203,9 @@ Glob patterns matched against each file's full path (forward slashes, cross-plat
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 14+
+- [Node.js](https://nodejs.org/) 22+
 - npm (included with Node.js)
+- Visual Studio Code 1.109+ (to run the extension)
 
 ### Install dependencies
 
@@ -232,13 +249,29 @@ npm run test:unit
 
 ### Integration tests
 
-Integration tests exercise the full extension (diagnostics, decorations, configuration) inside the VS Code Extension Development Host. Press **F5** in VS Code with the **"Extension Tests"** launch configuration selected.
+Integration tests exercise the full extension (diagnostics, decorations, configuration) inside a downloaded VS Code instance via `@vscode/test-electron`:
+
+```bash
+npm run compile
+npm run test:integration
+```
+
+On a headless machine (such as CI), wrap the command in `xvfb-run -a`. Alternatively, press **F5** in VS Code with the **"Extension Tests"** launch configuration selected.
 
 ### Performance tests
 
-Performance benchmarks run in the Extension Development Host. Press **F5** in VS Code with the **"Performance Tests"** launch configuration selected.
+Performance benchmarks run in the same harness:
 
-The suite measures scan latency for 10k-line documents (sparse and dense) and verifies cache behavior. No assertions are made automatically. Results are logged to the Debug Console.
+```bash
+npm run compile
+npm run test:perf
+```
+
+Or press **F5** with the **"Performance Tests"** launch configuration selected. The suite measures scan latency for 10k-line documents (sparse and dense) and verifies cache behavior. No assertions are made automatically. Results are logged to the console (or Debug Console when launched from VS Code).
+
+## Continuous Integration
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on pushes to `main` and on pull requests: lint, Prettier format check, unit tests, VSIX packaging, integration tests under `xvfb`, and a non-blocking `npm audit` of production dependencies.
 
 ## Packaging and Installation
 
@@ -254,14 +287,14 @@ npm install -g @vscode/vsce
 vsce package
 ```
 
-This runs the `vscode:prepublish` script (generate + compile), then produces a file like `character-witness-1.0.0.vsix`.
+This runs the `vscode:prepublish` script (generate + compile), then produces a file like `character-witness-<version>.vsix`.
 
 ### 3. Install the `.vsix`
 
 **From the command line:**
 
 ```bash
-code --install-extension character-witness-1.0.0.vsix
+code --install-extension character-witness-<version>.vsix
 ```
 
 **From the VS Code UI:**
@@ -290,24 +323,29 @@ Or right-click the extension in the Extensions sidebar and select **Uninstall**.
 
 ```
 src/
-  extension.ts          Activation, event wiring, scan cache, debounced updates
+  extension.ts          Activation, event wiring, debounced updates, hover provider
+  scancache.ts          LRU scan-result cache (cap 50) and incremental updates
   config.ts             Configuration parsing, decoration render options, defaults
-  scanner.ts            Document scanning, surrogate pair handling, diagnostic formatting
+  scanner.ts            Document scanning, surrogate pair handling, message formatting
+  diagnostics.ts        Per-line diagnostic grouping and severity filtering
   regions.ts            Regex-based string/comment region detection (~15 language families)
   decoration.ts         Decoration type lifecycle (create, fingerprint, dispose)
   autoreplace.ts        Auto-replace on save: builds TextEdit[] from cached matches
-  commands.ts           Command implementations (Add to Allowed Characters)
-  logger.ts             OutputChannel wrapper with timestamped logging
-  utils.ts              Pure utilities: u+hhhh parsing, title-casing, formatting
+  commands.ts           The three commands, incl. the move-to-user-settings flow
+  logger.ts             OutputChannel wrapper, throttled error notifications
+  utils.ts              Pure utilities: u+hhhh parsing, debounce, formatting
   generated/
     unicode-names.ts    Unicode name lookup: algorithmic ranges, name aliases, data file
   test/
-    unit.test.ts        Unit tests for pure functions (no VS Code API required)
-    extension.test.ts   Integration tests (run in Extension Development Host)
+    unit.test.ts        Unit tests (Vitest, no VS Code required)
+    extension.test.ts   Integration tests
     perf.test.ts        Performance benchmarks
+    runTests.ts         @vscode/test-electron bootstrap (integration or perf)
+    runExtensionTests.ts  Integration test runner
+    runPerfTests.ts     Performance test runner
 
 scripts/
-  generate-unicode-data.ts   Build-time generator for unicode-names.ts
+  generate-unicode-data.ts   Build-time generator for resources/unicode-names.txt
 ```
 
 ### Name resolution order

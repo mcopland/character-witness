@@ -13,7 +13,7 @@ vi.mock("vscode", () => ({
       public end: { line: number; character: number },
     ) {}
   },
-  Position: class {
+  Position: class Position {
     constructor(
       public line: number,
       public character: number,
@@ -25,6 +25,12 @@ vi.mock("vscode", () => ({
     isBefore(other: { line: number; character: number }): boolean {
       if (this.line !== other.line) return this.line < other.line;
       return this.character < other.character;
+    }
+    translate(lineDelta = 0, characterDelta = 0): Position {
+      return new Position(
+        this.line + lineDelta,
+        this.character + characterDelta,
+      );
     }
   },
   Selection: class {
@@ -41,6 +47,21 @@ vi.mock("vscode", () => ({
     Warning: 1,
     Information: 2,
     Hint: 3,
+  },
+  OverviewRulerLane: {
+    Left: 1,
+    Center: 2,
+    Right: 4,
+    Full: 7,
+  },
+  TextEdit: class TextEdit {
+    constructor(
+      public range: unknown,
+      public newText: string,
+    ) {}
+    static replace(range: unknown, newText: string): TextEdit {
+      return new TextEdit(range, newText);
+    }
   },
   Diagnostic: class {
     source?: string;
@@ -74,12 +95,26 @@ vi.mock("vscode", () => ({
 // Run with:  npx vitest run
 // ---------------------------------------------------------------------------
 
-import { addToAllowedCharacters, goToNextNonAsciiCharacter } from "../commands";
+import {
+  addToAllowedCharacters,
+  appendMissingEntries,
+  collectNonAsciiFromSelections,
+  formatCharEntries,
+  goToNextNonAsciiCharacter,
+  parseEntryChars,
+} from "../commands";
+import {
+  buildReplacementEdits,
+  buildReplacementsOnDemand,
+} from "../autoreplace";
 import * as configModule from "../config";
 import {
+  buildDecorationRenderOptions,
   compileIgnoredPaths,
   ExtensionConfig,
   getCharacterSeverity,
+  parseReplacementMap,
+  parseSeverityOverrides,
 } from "../config";
 import {
   disposeDecorationType,
@@ -87,8 +122,14 @@ import {
   resetDecorationKey,
 } from "../decoration";
 import { buildLineDiagnostics } from "../diagnostics";
-import { handleError } from "../logger";
+import { handleError, resetErrorThrottle } from "../logger";
 import { isIgnoredDocument } from "../extension";
+import {
+  computeFingerprint,
+  INCREMENTAL_THRESHOLD_LINES,
+  SCAN_CACHE_CAP,
+  ScanCache,
+} from "../scancache";
 import {
   getCharacterName,
   parseNameTable,
@@ -107,6 +148,7 @@ import {
   NonAsciiMatch,
 } from "../scanner";
 import {
+  debounce,
   formatCodePoint,
   formatUPlus,
   parseCharacterEntries,
@@ -886,37 +928,29 @@ describe("findNonAsciiCharacters", () => {
 
   test("includeStrings=false skips characters in strings", () => {
     const doc = mockDocument('const x = "\u00e9";', "javascript");
-    const matches = findNonAsciiCharacters(
-      doc,
-      new Set(),
-      false,
-      true,
-      "javascript",
-    );
+    const matches = findNonAsciiCharacters(doc, new Set(), {
+      includeStrings: false,
+      languageId: "javascript",
+    });
     assert.strictEqual(matches.length, 0);
   });
 
   test("includeComments=false skips characters in comments", () => {
     const doc = mockDocument("// \u00e9", "javascript");
-    const matches = findNonAsciiCharacters(
-      doc,
-      new Set(),
-      true,
-      false,
-      "javascript",
-    );
+    const matches = findNonAsciiCharacters(doc, new Set(), {
+      includeComments: false,
+      languageId: "javascript",
+    });
     assert.strictEqual(matches.length, 0);
   });
 
   test("characters outside strings/comments found even when filters active", () => {
     const doc = mockDocument('const \u00e9 = "\u00f1";', "javascript");
-    const matches = findNonAsciiCharacters(
-      doc,
-      new Set(),
-      false,
-      false,
-      "javascript",
-    );
+    const matches = findNonAsciiCharacters(doc, new Set(), {
+      includeStrings: false,
+      includeComments: false,
+      languageId: "javascript",
+    });
     assert.strictEqual(matches.length, 1);
     assert.strictEqual(matches[0].char, "\u00e9");
   });
@@ -929,40 +963,25 @@ describe("findNonAsciiCharacters", () => {
 
   test("returns empty when text exceeds maxFileSizeCodeUnits", () => {
     const doc = mockDocument("hello \u2019 world");
-    const matches = findNonAsciiCharacters(
-      doc,
-      new Set(),
-      true,
-      true,
-      "plaintext",
-      5,
-    );
+    const matches = findNonAsciiCharacters(doc, new Set(), {
+      maxFileSizeCodeUnits: 5,
+    });
     assert.strictEqual(matches.length, 0);
   });
 
   test("scans normally when text is within maxFileSizeCodeUnits", () => {
     const doc = mockDocument("hello \u2019 world");
-    const matches = findNonAsciiCharacters(
-      doc,
-      new Set(),
-      true,
-      true,
-      "plaintext",
-      1024,
-    );
+    const matches = findNonAsciiCharacters(doc, new Set(), {
+      maxFileSizeCodeUnits: 1024,
+    });
     assert.strictEqual(matches.length, 1);
   });
 
   test("treats POSITIVE_INFINITY maxFileSizeCodeUnits as unlimited", () => {
     const doc = mockDocument("hello \u2019 world");
-    const matches = findNonAsciiCharacters(
-      doc,
-      new Set(),
-      true,
-      true,
-      "plaintext",
-      Number.POSITIVE_INFINITY,
-    );
+    const matches = findNonAsciiCharacters(doc, new Set(), {
+      maxFileSizeCodeUnits: Number.POSITIVE_INFINITY,
+    });
     assert.strictEqual(matches.length, 1);
   });
 });
@@ -1485,6 +1504,350 @@ describe("incremental rescan property test", () => {
 });
 
 // ---------------------------------------------------------------------------
+// ScanCache
+// ---------------------------------------------------------------------------
+
+// Constructed at runtime to keep this source file pure ASCII.
+const E_ACUTE = String.fromCodePoint(0xe9);
+const N_TILDE = String.fromCodePoint(0xf1);
+
+function cacheDocument(
+  text: string,
+  uri: string,
+  version = 1,
+  languageId = "plaintext",
+): vscode.TextDocument {
+  return Object.assign(richMockDocument(text), {
+    uri: { toString: () => uri },
+    version,
+    languageId,
+  }) as vscode.TextDocument;
+}
+
+function cacheConfig(
+  overrides: Partial<ExtensionConfig> = {},
+): ExtensionConfig {
+  return { ...makeConfig(new Set()), ...overrides };
+}
+
+function changeEvent(
+  document: vscode.TextDocument,
+  changes: Array<{
+    range: {
+      start: { line: number; character: number };
+      end: { line: number; character: number };
+    };
+    text: string;
+  }>,
+): vscode.TextDocumentChangeEvent {
+  return {
+    document,
+    contentChanges: changes,
+  } as unknown as vscode.TextDocumentChangeEvent;
+}
+
+/** A document large enough to qualify for the incremental path. */
+function bigText(): string {
+  const lines: string[] = [];
+  for (let i = 0; i < INCREMENTAL_THRESHOLD_LINES + 100; i++) {
+    lines.push(i === 10 ? `a${E_ACUTE}b` : `line${i}`);
+  }
+  return lines.join("\n");
+}
+
+describe("computeFingerprint", () => {
+  const doc = cacheDocument("abc", "file:///fp.txt", 1, "javascript");
+
+  test("identical inputs produce identical fingerprints", () => {
+    assert.strictEqual(
+      computeFingerprint(doc, cacheConfig()),
+      computeFingerprint(doc, cacheConfig()),
+    );
+  });
+
+  test("changes when allowedCharactersKey changes", () => {
+    assert.notStrictEqual(
+      computeFingerprint(doc, cacheConfig()),
+      computeFingerprint(doc, cacheConfig({ allowedCharactersKey: E_ACUTE })),
+    );
+  });
+
+  test("changes when includeStrings changes", () => {
+    assert.notStrictEqual(
+      computeFingerprint(doc, cacheConfig()),
+      computeFingerprint(doc, cacheConfig({ includeStrings: false })),
+    );
+  });
+
+  test("changes when includeComments changes", () => {
+    assert.notStrictEqual(
+      computeFingerprint(doc, cacheConfig()),
+      computeFingerprint(doc, cacheConfig({ includeComments: false })),
+    );
+  });
+
+  test("changes when maxFileSizeCodeUnits changes", () => {
+    assert.notStrictEqual(
+      computeFingerprint(doc, cacheConfig()),
+      computeFingerprint(doc, cacheConfig({ maxFileSizeCodeUnits: 1024 })),
+    );
+  });
+
+  test("changes when document languageId changes", () => {
+    const pythonDoc = cacheDocument("abc", "file:///fp.txt", 1, "python");
+    assert.notStrictEqual(
+      computeFingerprint(doc, cacheConfig()),
+      computeFingerprint(pythonDoc, cacheConfig()),
+    );
+  });
+});
+
+describe("ScanCache", () => {
+  test("returns the same array instance on cache hit", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const doc = cacheDocument(`a${E_ACUTE}b`, "file:///hit.txt", 3);
+    const first = cache.getCachedMatches(doc, config);
+    const second = cache.getCachedMatches(doc, config);
+    assert.strictEqual(second, first);
+    assert.strictEqual(first.length, 1);
+  });
+
+  test("rescans when the document version changes", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const uri = "file:///version.txt";
+    const first = cache.getCachedMatches(
+      cacheDocument(`a${E_ACUTE}b`, uri, 1),
+      config,
+    );
+    const second = cache.getCachedMatches(
+      cacheDocument(`a${E_ACUTE}b${N_TILDE}`, uri, 2),
+      config,
+    );
+    assert.notStrictEqual(second, first);
+    assert.strictEqual(second.length, 2);
+  });
+
+  test("rescans when the config fingerprint changes", () => {
+    const cache = new ScanCache();
+    const doc = cacheDocument(`a${E_ACUTE}b`, "file:///fingerprint.txt", 1);
+    const first = cache.getCachedMatches(doc, cacheConfig());
+    const second = cache.getCachedMatches(
+      doc,
+      cacheConfig({ allowedCharactersKey: "changed" }),
+    );
+    assert.notStrictEqual(second, first);
+  });
+
+  test("delete removes the entry; clear empties the cache", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    cache.getCachedMatches(cacheDocument("x", "file:///a.txt"), config);
+    cache.getCachedMatches(cacheDocument("y", "file:///b.txt"), config);
+    assert.strictEqual(cache.size, 2);
+
+    cache.delete("file:///a.txt");
+    assert.strictEqual(cache.has("file:///a.txt"), false);
+    assert.strictEqual(cache.has("file:///b.txt"), true);
+
+    cache.clear();
+    assert.strictEqual(cache.size, 0);
+  });
+
+  test("evicts the least-recently-used entry beyond the cap", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    for (let i = 0; i <= SCAN_CACHE_CAP; i++) {
+      cache.getCachedMatches(
+        cacheDocument("plain", `file:///doc${i}.txt`),
+        config,
+      );
+    }
+    assert.strictEqual(cache.size, SCAN_CACHE_CAP);
+    assert.strictEqual(cache.has("file:///doc0.txt"), false);
+    assert.strictEqual(cache.has(`file:///doc${SCAN_CACHE_CAP}.txt`), true);
+  });
+
+  test("re-touching an entry promotes it past eviction (MRU)", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const docs: vscode.TextDocument[] = [];
+    for (let i = 0; i < SCAN_CACHE_CAP; i++) {
+      const doc = cacheDocument("plain", `file:///doc${i}.txt`);
+      docs.push(doc);
+      cache.getCachedMatches(doc, config);
+    }
+    cache.getCachedMatches(docs[0], config);
+    cache.getCachedMatches(cacheDocument("plain", "file:///new.txt"), config);
+    assert.strictEqual(cache.has("file:///doc0.txt"), true);
+    assert.strictEqual(cache.has("file:///doc1.txt"), false);
+  });
+
+  test("tryIncrementalUpdate applies a single change to a cached large document", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const uri = "file:///big.txt";
+    const initial = bigText();
+    const cached = cache.getCachedMatches(
+      cacheDocument(initial, uri, 1),
+      config,
+    );
+    assert.strictEqual(cached.length, 1);
+
+    const change = {
+      range: {
+        start: { line: 20, character: 0 },
+        end: { line: 20, character: 0 },
+      },
+      text: N_TILDE,
+    };
+    const newText = applyChangeToText(initial, change);
+    const docV2 = cacheDocument(newText, uri, 2);
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(changeEvent(docV2, [change]), config),
+      true,
+    );
+
+    const expected = findNonAsciiCharacters(
+      richMockDocument(newText),
+      new Set(),
+    );
+    const matches = cache.getCachedMatches(docV2, config);
+    assert.ok(
+      matchesEqual(matches, expected),
+      `incremental != full\n  expected: ${expected.map(describeMatch).join(", ")}\n  got:      ${matches.map(describeMatch).join(", ")}`,
+    );
+  });
+
+  test("falls back to a full rescan for multi-change events", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const uri = "file:///multi.txt";
+    const lines: string[] = [];
+    for (let i = 0; i < INCREMENTAL_THRESHOLD_LINES + 100; i++) {
+      if (i === 10) lines.push(`a${E_ACUTE}b`);
+      else if (i === 4000) lines.push(`c${N_TILDE}d`);
+      else lines.push(`line${i}`);
+    }
+    const initial = lines.join("\n");
+    cache.getCachedMatches(cacheDocument(initial, uri, 1), config);
+
+    // VS Code delivers contentChanges in reverse document order, each using
+    // pre-event coordinates. The earlier-in-document change adds a newline,
+    // which invalidates the later change's pre-event line numbers against
+    // the fully-updated document.
+    const laterChange = {
+      range: {
+        start: { line: 3000, character: 0 },
+        end: { line: 3000, character: 0 },
+      },
+      text: N_TILDE,
+    };
+    const earlierChange = {
+      range: {
+        start: { line: 100, character: 0 },
+        end: { line: 100, character: 0 },
+      },
+      text: "x\n",
+    };
+    const newText = applyChangeToText(
+      applyChangeToText(initial, laterChange),
+      earlierChange,
+    );
+    const docV2 = cacheDocument(newText, uri, 2);
+
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(
+        changeEvent(docV2, [laterChange, earlierChange]),
+        config,
+      ),
+      false,
+    );
+
+    const expected = findNonAsciiCharacters(
+      richMockDocument(newText),
+      new Set(),
+    );
+    const matches = cache.getCachedMatches(docV2, config);
+    assert.ok(
+      matchesEqual(matches, expected),
+      `multi-change result != full scan\n  expected: ${expected.map(describeMatch).join(", ")}\n  got:      ${matches.map(describeMatch).join(", ")}`,
+    );
+  });
+
+  const noopChange = {
+    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+    text: "x",
+  };
+
+  test("tryIncrementalUpdate returns false below the line threshold", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const uri = "file:///small.txt";
+    cache.getCachedMatches(cacheDocument(`a${E_ACUTE}b`, uri, 1), config);
+    const docV2 = cacheDocument(`xa${E_ACUTE}b`, uri, 2);
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(changeEvent(docV2, [noopChange]), config),
+      false,
+    );
+  });
+
+  test("tryIncrementalUpdate returns false when string/comment filters are active", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig({ includeStrings: false });
+    const uri = "file:///filtered.txt";
+    const initial = bigText();
+    cache.getCachedMatches(cacheDocument(initial, uri, 1), config);
+    const docV2 = cacheDocument(`x${initial}`, uri, 2);
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(changeEvent(docV2, [noopChange]), config),
+      false,
+    );
+  });
+
+  test("tryIncrementalUpdate returns false without a cache entry", () => {
+    const cache = new ScanCache();
+    const docV2 = cacheDocument(bigText(), "file:///uncached.txt", 2);
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(
+        changeEvent(docV2, [noopChange]),
+        cacheConfig(),
+      ),
+      false,
+    );
+  });
+
+  test("tryIncrementalUpdate returns false on fingerprint mismatch", () => {
+    const cache = new ScanCache();
+    const uri = "file:///stale-config.txt";
+    const initial = bigText();
+    cache.getCachedMatches(cacheDocument(initial, uri, 1), cacheConfig());
+    const docV2 = cacheDocument(`x${initial}`, uri, 2);
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(
+        changeEvent(docV2, [noopChange]),
+        cacheConfig({ allowedCharactersKey: "changed" }),
+      ),
+      false,
+    );
+  });
+
+  test("tryIncrementalUpdate returns false when a version was skipped", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const uri = "file:///version-gap.txt";
+    const initial = bigText();
+    cache.getCachedMatches(cacheDocument(initial, uri, 1), config);
+    const docV3 = cacheDocument(`x${initial}`, uri, 3);
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(changeEvent(docV3, [noopChange]), config),
+      false,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // addToAllowedCharacters -- written entry must respect codePointFormat/Case
 // ---------------------------------------------------------------------------
 
@@ -1571,6 +1934,150 @@ describe("addToAllowedCharacters", () => {
 });
 
 // ---------------------------------------------------------------------------
+// addToAllowedCharacters pure helpers
+// ---------------------------------------------------------------------------
+
+// Single-line document stub; ranges are interpreted as character offsets.
+function lineDocument(text: string): Pick<vscode.TextDocument, "getText"> {
+  return {
+    getText: (range?: vscode.Range) => {
+      if (!range) return text;
+      return text.slice(range.start.character, range.end.character);
+    },
+  };
+}
+
+function sel(startCh: number, endCh: number): vscode.Selection {
+  const start = new vscode.Position(0, startCh);
+  const end = new vscode.Position(0, endCh);
+  return {
+    isEmpty: startCh === endCh,
+    anchor: start,
+    active: startCh === endCh ? start : end,
+    start,
+    end,
+  } as unknown as vscode.Selection;
+}
+
+describe("collectNonAsciiFromSelections", () => {
+  const EMOJI = String.fromCodePoint(0x1f600);
+
+  test("collects all non-ASCII characters in a selection, skipping ASCII", () => {
+    const doc = lineDocument(`a${E_ACUTE}b${N_TILDE}c`);
+    const chars = collectNonAsciiFromSelections(doc, [sel(0, 5)], new Set());
+    assert.deepStrictEqual([...chars].sort(), [E_ACUTE, N_TILDE].sort());
+  });
+
+  test("skips characters already in the allowed set", () => {
+    const doc = lineDocument(`a${E_ACUTE}b${N_TILDE}c`);
+    const chars = collectNonAsciiFromSelections(
+      doc,
+      [sel(0, 5)],
+      new Set([E_ACUTE]),
+    );
+    assert.deepStrictEqual([...chars], [N_TILDE]);
+  });
+
+  test("empty selection picks the character at the cursor", () => {
+    const doc = lineDocument(`a${E_ACUTE}b`);
+    const chars = collectNonAsciiFromSelections(doc, [sel(1, 1)], new Set());
+    assert.deepStrictEqual([...chars], [E_ACUTE]);
+  });
+
+  test("cursor on a surrogate-pair lead captures the full pair", () => {
+    const doc = lineDocument(`a${EMOJI}b`);
+    const chars = collectNonAsciiFromSelections(doc, [sel(1, 1)], new Set());
+    assert.deepStrictEqual([...chars], [EMOJI]);
+  });
+
+  test("cursor at end of document yields nothing", () => {
+    const doc = lineDocument("ab");
+    const chars = collectNonAsciiFromSelections(doc, [sel(2, 2)], new Set());
+    assert.strictEqual(chars.size, 0);
+  });
+
+  test("cursor on an ASCII character yields nothing", () => {
+    const doc = lineDocument(`a${E_ACUTE}b`);
+    const chars = collectNonAsciiFromSelections(doc, [sel(0, 0)], new Set());
+    assert.strictEqual(chars.size, 0);
+  });
+
+  test("deduplicates across multiple selections", () => {
+    const doc = lineDocument(`${E_ACUTE}a${E_ACUTE}`);
+    const chars = collectNonAsciiFromSelections(
+      doc,
+      [sel(0, 1), sel(2, 3)],
+      new Set(),
+    );
+    assert.deepStrictEqual([...chars], [E_ACUTE]);
+  });
+});
+
+describe("parseEntryChars", () => {
+  test("parses mixed notations into characters", () => {
+    const chars = parseEntryChars(["u+00e9", "0x00F1", "\\u00a3"]);
+    assert.deepStrictEqual(
+      [...chars].sort(),
+      [E_ACUTE, N_TILDE, String.fromCodePoint(0xa3)].sort(),
+    );
+  });
+
+  test("skips unparseable entries", () => {
+    const chars = parseEntryChars(["bogus", "", "u+00e9"]);
+    assert.deepStrictEqual([...chars], [E_ACUTE]);
+  });
+});
+
+describe("appendMissingEntries", () => {
+  test("appends only entries whose character is not already present", () => {
+    const { merged, added } = appendMissingEntries(
+      ["u+00e9"],
+      ["U+00F1", "U+00A3"],
+    );
+    assert.deepStrictEqual(added, ["U+00F1", "U+00A3"]);
+    assert.deepStrictEqual(merged, ["u+00e9", "U+00F1", "U+00A3"]);
+  });
+
+  test("detects duplicates across different notations", () => {
+    const { merged, added } = appendMissingEntries(["u+00e9"], ["0x00E9"]);
+    assert.deepStrictEqual(added, []);
+    assert.deepStrictEqual(merged, ["u+00e9"]);
+  });
+
+  test("does not append the same character twice from the candidate list", () => {
+    const { added } = appendMissingEntries([], ["U+00F1", "0x00f1"]);
+    assert.deepStrictEqual(added, ["U+00F1"]);
+  });
+
+  test("skips unparseable candidates and preserves existing order", () => {
+    const { merged, added } = appendMissingEntries(
+      ["u+00e9", "u+00a3"],
+      ["bogus", "U+00F1"],
+    );
+    assert.deepStrictEqual(added, ["U+00F1"]);
+    assert.deepStrictEqual(merged, ["u+00e9", "u+00a3", "U+00F1"]);
+  });
+});
+
+describe("formatCharEntries", () => {
+  test("respects codePointFormat and codePointCase", () => {
+    assert.deepStrictEqual(formatCharEntries([E_ACUTE], "0x", "upper"), [
+      "0x00E9",
+    ]);
+    assert.deepStrictEqual(formatCharEntries([E_ACUTE], "u+", "lower"), [
+      "u+00e9",
+    ]);
+  });
+
+  test("formats supplementary-plane characters with full hex", () => {
+    const EMOJI = String.fromCodePoint(0x1f600);
+    assert.deepStrictEqual(formatCharEntries([EMOJI], "u+", "upper"), [
+      "U+1F600",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // invalidateConfig -- per-URI eviction
 // ---------------------------------------------------------------------------
 
@@ -1629,6 +2136,7 @@ describe("invalidateConfig", () => {
 describe("handleError", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    resetErrorThrottle();
     (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mockClear();
   });
 
@@ -1674,6 +2182,31 @@ describe("handleError", () => {
       (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls
         .length,
       2,
+    );
+  });
+
+  test("suppresses a repeated message even after a different message intervenes", () => {
+    handleError("ctx", new Error("error A"));
+    handleError("ctx", new Error("error B"));
+    handleError("ctx", new Error("error A"));
+    assert.strictEqual(
+      (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls
+        .length,
+      2,
+    );
+  });
+
+  test("each message expires on its own window despite interleaving", () => {
+    handleError("ctx", new Error("error A"));
+    vi.advanceTimersByTime(6_000);
+    handleError("ctx", new Error("error B"));
+    vi.advanceTimersByTime(5_000);
+    handleError("ctx", new Error("error A"));
+    handleError("ctx", new Error("error B"));
+    assert.strictEqual(
+      (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls
+        .length,
+      3,
     );
   });
 });
@@ -1869,5 +2402,261 @@ describe("parseNameTable", () => {
     const txt = "2014 EM DASH\n";
     const map = parseNameTable(txt);
     assert.strictEqual(map.get(0x2014), "EM DASH");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// autoreplace: buildReplacementEdits / buildReplacementsOnDemand
+// ---------------------------------------------------------------------------
+
+describe("autoreplace", () => {
+  const doc = {
+    uri: { toString: () => "file:///autoreplace.txt" },
+  } as unknown as vscode.TextDocument;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function spyConfig(overrides: Partial<ExtensionConfig>): void {
+    vi.spyOn(configModule, "getConfig").mockReturnValue(cacheConfig(overrides));
+  }
+
+  test("buildReplacementEdits builds edits for mapped characters only", () => {
+    spyConfig({
+      autoReplaceOnSave: true,
+      replacements: [{ from: E_ACUTE, to: "e" }],
+    });
+    const matches = [makeMatch(E_ACUTE, 0, 1), makeMatch(N_TILDE, 0, 3)];
+    const edits = buildReplacementEdits(doc, () => matches);
+    assert.strictEqual(edits.length, 1);
+    assert.strictEqual(edits[0].newText, "e");
+    assert.strictEqual(edits[0].range.start.character, 1);
+  });
+
+  test("buildReplacementEdits returns [] when the extension is disabled", () => {
+    spyConfig({
+      enable: false,
+      autoReplaceOnSave: true,
+      replacements: [{ from: E_ACUTE, to: "e" }],
+    });
+    assert.deepStrictEqual(
+      buildReplacementEdits(doc, () => [makeMatch(E_ACUTE, 0, 0)]),
+      [],
+    );
+  });
+
+  test("buildReplacementEdits returns [] when autoReplaceOnSave is off", () => {
+    spyConfig({
+      autoReplaceOnSave: false,
+      replacements: [{ from: E_ACUTE, to: "e" }],
+    });
+    assert.deepStrictEqual(
+      buildReplacementEdits(doc, () => [makeMatch(E_ACUTE, 0, 0)]),
+      [],
+    );
+  });
+
+  test("buildReplacementsOnDemand works regardless of autoReplaceOnSave", () => {
+    spyConfig({
+      autoReplaceOnSave: false,
+      replacements: [{ from: E_ACUTE, to: "e" }],
+    });
+    const edits = buildReplacementsOnDemand(doc, () => [
+      makeMatch(E_ACUTE, 0, 0),
+    ]);
+    assert.strictEqual(edits.length, 1);
+  });
+
+  test("buildReplacementsOnDemand returns [] when the extension is disabled", () => {
+    spyConfig({ enable: false, replacements: [{ from: E_ACUTE, to: "e" }] });
+    assert.deepStrictEqual(
+      buildReplacementsOnDemand(doc, () => [makeMatch(E_ACUTE, 0, 0)]),
+      [],
+    );
+  });
+
+  test("returns [] when no match is in the replacement map", () => {
+    spyConfig({
+      autoReplaceOnSave: true,
+      replacements: [{ from: E_ACUTE, to: "e" }],
+    });
+    assert.deepStrictEqual(
+      buildReplacementEdits(doc, () => [makeMatch(N_TILDE, 0, 0)]),
+      [],
+    );
+  });
+
+  test("returns [] and notifies the user when the matcher throws", () => {
+    spyConfig({
+      autoReplaceOnSave: true,
+      replacements: [{ from: E_ACUTE, to: "e" }],
+    });
+    const showError = vscode.window.showErrorMessage as ReturnType<
+      typeof vi.fn
+    >;
+    showError.mockClear();
+    const edits = buildReplacementEdits(doc, () => {
+      throw new Error("matcher exploded in buildReplacementEdits test");
+    });
+    assert.deepStrictEqual(edits, []);
+    assert.ok(
+      showError.mock.calls.some(c => String(c[0]).includes("matcher exploded")),
+      "expected a user-facing error notification",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// config parsers
+// ---------------------------------------------------------------------------
+
+describe("parseReplacementMap", () => {
+  const EN_DASH = String.fromCodePoint(0x2013);
+
+  test("single u+hhhh key", () => {
+    assert.deepStrictEqual(parseReplacementMap({ "u+2013": "-" }), [
+      { from: EN_DASH, to: "-" },
+    ]);
+  });
+
+  test("range key expands to every character in the range", () => {
+    const entries = parseReplacementMap({ "u+2013 - u+2015": "-" });
+    assert.strictEqual(entries.length, 3);
+    assert.ok(entries.every(e => e.to === "-"));
+  });
+
+  test("comma-separated key", () => {
+    const entries = parseReplacementMap({ "u+2018, u+2019": "'" });
+    assert.strictEqual(entries.length, 2);
+  });
+
+  test("combined comma and range key", () => {
+    const entries = parseReplacementMap({ "u+2018, u+201c - u+201d": "'" });
+    assert.strictEqual(entries.length, 3);
+  });
+
+  test("invalid keys are skipped", () => {
+    assert.deepStrictEqual(parseReplacementMap({ bogus: "-" }), []);
+  });
+});
+
+describe("parseSeverityOverrides", () => {
+  test("maps valid entries to DiagnosticSeverity", () => {
+    const map = parseSeverityOverrides({
+      "u+00a0": "warning",
+      "u+200b": "error",
+      "u+00e9": "info",
+    });
+    assert.strictEqual(
+      map.get(String.fromCodePoint(0xa0)),
+      vscode.DiagnosticSeverity.Warning,
+    );
+    assert.strictEqual(
+      map.get(String.fromCodePoint(0x200b)),
+      vscode.DiagnosticSeverity.Error,
+    );
+    assert.strictEqual(map.get(E_ACUTE), vscode.DiagnosticSeverity.Information);
+  });
+
+  test("severity strings are case-insensitive", () => {
+    const map = parseSeverityOverrides({ "u+00a0": "ERROR" });
+    assert.strictEqual(
+      map.get(String.fromCodePoint(0xa0)),
+      vscode.DiagnosticSeverity.Error,
+    );
+  });
+
+  test("invalid severity values are skipped", () => {
+    assert.strictEqual(parseSeverityOverrides({ "u+00a0": "fatal" }).size, 0);
+  });
+
+  test("unparseable keys are skipped", () => {
+    assert.strictEqual(parseSeverityOverrides({ bogus: "error" }).size, 0);
+  });
+
+  test("keys are single code points only; range keys yield no entry", () => {
+    assert.strictEqual(
+      parseSeverityOverrides({ "u+2013 - u+2015": "error" }).size,
+      0,
+    );
+  });
+});
+
+describe("buildDecorationRenderOptions", () => {
+  test("omits overviewRulerLane when overviewRulerColor is unset", () => {
+    const opts = buildDecorationRenderOptions({
+      backgroundColor: "red",
+      overviewRulerLane: "Left",
+    });
+    assert.strictEqual(opts.overviewRulerLane, undefined);
+    assert.strictEqual(opts.backgroundColor, "red");
+  });
+
+  test("maps lane names when overviewRulerColor is set", () => {
+    const laneFor = (lane: string) =>
+      buildDecorationRenderOptions({
+        overviewRulerColor: "cyan",
+        overviewRulerLane: lane,
+      }).overviewRulerLane;
+    assert.strictEqual(laneFor("Left"), vscode.OverviewRulerLane.Left);
+    assert.strictEqual(laneFor("Right"), vscode.OverviewRulerLane.Right);
+    assert.strictEqual(laneFor("Full"), vscode.OverviewRulerLane.Full);
+    assert.strictEqual(laneFor("Center"), vscode.OverviewRulerLane.Center);
+    assert.strictEqual(laneFor("Diagonal"), vscode.OverviewRulerLane.Center);
+  });
+
+  test("defaults the lane to Center when unspecified", () => {
+    const opts = buildDecorationRenderOptions({ overviewRulerColor: "cyan" });
+    assert.strictEqual(opts.overviewRulerLane, vscode.OverviewRulerLane.Center);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// debounce
+// ---------------------------------------------------------------------------
+
+describe("debounce", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.runAllTimers();
+    vi.useRealTimers();
+  });
+
+  test("coalesces rapid calls into one trailing call with latest args", () => {
+    const fn = vi.fn();
+    const debounced = debounce(fn, 100);
+    debounced(1);
+    debounced(2);
+    debounced(3);
+    vi.advanceTimersByTime(99);
+    assert.strictEqual(fn.mock.calls.length, 0);
+    vi.advanceTimersByTime(1);
+    assert.strictEqual(fn.mock.calls.length, 1);
+    assert.deepStrictEqual(fn.mock.calls[0], [3]);
+  });
+
+  test("cancel suppresses the pending call", () => {
+    const fn = vi.fn();
+    const debounced = debounce(fn, 100);
+    debounced("x");
+    debounced.cancel();
+    vi.advanceTimersByTime(200);
+    assert.strictEqual(fn.mock.calls.length, 0);
+  });
+
+  test("is reusable after firing and after cancel", () => {
+    const fn = vi.fn();
+    const debounced = debounce(fn, 100);
+    debounced("a");
+    vi.advanceTimersByTime(100);
+    debounced("b");
+    debounced.cancel();
+    debounced("c");
+    vi.advanceTimersByTime(100);
+    assert.deepStrictEqual(fn.mock.calls, [["a"], ["c"]]);
   });
 });
