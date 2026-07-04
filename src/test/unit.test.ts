@@ -90,6 +90,12 @@ import { buildLineDiagnostics } from "../diagnostics";
 import { handleError } from "../logger";
 import { isIgnoredDocument } from "../extension";
 import {
+  computeFingerprint,
+  INCREMENTAL_THRESHOLD_LINES,
+  SCAN_CACHE_CAP,
+  ScanCache,
+} from "../scancache";
+import {
   getCharacterName,
   parseNameTable,
   UNICODE_VERSION,
@@ -1482,6 +1488,294 @@ describe("incremental rescan property test", () => {
       matches = incremental;
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// ScanCache
+// ---------------------------------------------------------------------------
+
+// Constructed at runtime to keep this source file pure ASCII.
+const E_ACUTE = String.fromCodePoint(0xe9);
+const N_TILDE = String.fromCodePoint(0xf1);
+
+function cacheDocument(
+  text: string,
+  uri: string,
+  version = 1,
+  languageId = "plaintext",
+): vscode.TextDocument {
+  return Object.assign(richMockDocument(text), {
+    uri: { toString: () => uri },
+    version,
+    languageId,
+  }) as vscode.TextDocument;
+}
+
+function cacheConfig(
+  overrides: Partial<ExtensionConfig> = {},
+): ExtensionConfig {
+  return { ...makeConfig(new Set()), ...overrides };
+}
+
+function changeEvent(
+  document: vscode.TextDocument,
+  changes: Array<{
+    range: {
+      start: { line: number; character: number };
+      end: { line: number; character: number };
+    };
+    text: string;
+  }>,
+): vscode.TextDocumentChangeEvent {
+  return {
+    document,
+    contentChanges: changes,
+  } as unknown as vscode.TextDocumentChangeEvent;
+}
+
+/** A document large enough to qualify for the incremental path. */
+function bigText(): string {
+  const lines: string[] = [];
+  for (let i = 0; i < INCREMENTAL_THRESHOLD_LINES + 100; i++) {
+    lines.push(i === 10 ? `a${E_ACUTE}b` : `line${i}`);
+  }
+  return lines.join("\n");
+}
+
+describe("computeFingerprint", () => {
+  const doc = cacheDocument("abc", "file:///fp.txt", 1, "javascript");
+
+  test("identical inputs produce identical fingerprints", () => {
+    assert.strictEqual(
+      computeFingerprint(doc, cacheConfig()),
+      computeFingerprint(doc, cacheConfig()),
+    );
+  });
+
+  test("changes when allowedCharactersKey changes", () => {
+    assert.notStrictEqual(
+      computeFingerprint(doc, cacheConfig()),
+      computeFingerprint(doc, cacheConfig({ allowedCharactersKey: E_ACUTE })),
+    );
+  });
+
+  test("changes when includeStrings changes", () => {
+    assert.notStrictEqual(
+      computeFingerprint(doc, cacheConfig()),
+      computeFingerprint(doc, cacheConfig({ includeStrings: false })),
+    );
+  });
+
+  test("changes when includeComments changes", () => {
+    assert.notStrictEqual(
+      computeFingerprint(doc, cacheConfig()),
+      computeFingerprint(doc, cacheConfig({ includeComments: false })),
+    );
+  });
+
+  test("changes when maxFileSizeCodeUnits changes", () => {
+    assert.notStrictEqual(
+      computeFingerprint(doc, cacheConfig()),
+      computeFingerprint(doc, cacheConfig({ maxFileSizeCodeUnits: 1024 })),
+    );
+  });
+
+  test("changes when document languageId changes", () => {
+    const pythonDoc = cacheDocument("abc", "file:///fp.txt", 1, "python");
+    assert.notStrictEqual(
+      computeFingerprint(doc, cacheConfig()),
+      computeFingerprint(pythonDoc, cacheConfig()),
+    );
+  });
+});
+
+describe("ScanCache", () => {
+  test("returns the same array instance on cache hit", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const doc = cacheDocument(`a${E_ACUTE}b`, "file:///hit.txt", 3);
+    const first = cache.getCachedMatches(doc, config);
+    const second = cache.getCachedMatches(doc, config);
+    assert.strictEqual(second, first);
+    assert.strictEqual(first.length, 1);
+  });
+
+  test("rescans when the document version changes", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const uri = "file:///version.txt";
+    const first = cache.getCachedMatches(
+      cacheDocument(`a${E_ACUTE}b`, uri, 1),
+      config,
+    );
+    const second = cache.getCachedMatches(
+      cacheDocument(`a${E_ACUTE}b${N_TILDE}`, uri, 2),
+      config,
+    );
+    assert.notStrictEqual(second, first);
+    assert.strictEqual(second.length, 2);
+  });
+
+  test("rescans when the config fingerprint changes", () => {
+    const cache = new ScanCache();
+    const doc = cacheDocument(`a${E_ACUTE}b`, "file:///fingerprint.txt", 1);
+    const first = cache.getCachedMatches(doc, cacheConfig());
+    const second = cache.getCachedMatches(
+      doc,
+      cacheConfig({ allowedCharactersKey: "changed" }),
+    );
+    assert.notStrictEqual(second, first);
+  });
+
+  test("delete removes the entry; clear empties the cache", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    cache.getCachedMatches(cacheDocument("x", "file:///a.txt"), config);
+    cache.getCachedMatches(cacheDocument("y", "file:///b.txt"), config);
+    assert.strictEqual(cache.size, 2);
+
+    cache.delete("file:///a.txt");
+    assert.strictEqual(cache.has("file:///a.txt"), false);
+    assert.strictEqual(cache.has("file:///b.txt"), true);
+
+    cache.clear();
+    assert.strictEqual(cache.size, 0);
+  });
+
+  test("evicts the least-recently-used entry beyond the cap", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    for (let i = 0; i <= SCAN_CACHE_CAP; i++) {
+      cache.getCachedMatches(
+        cacheDocument("plain", `file:///doc${i}.txt`),
+        config,
+      );
+    }
+    assert.strictEqual(cache.size, SCAN_CACHE_CAP);
+    assert.strictEqual(cache.has("file:///doc0.txt"), false);
+    assert.strictEqual(cache.has(`file:///doc${SCAN_CACHE_CAP}.txt`), true);
+  });
+
+  test("re-touching an entry promotes it past eviction (MRU)", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const docs: vscode.TextDocument[] = [];
+    for (let i = 0; i < SCAN_CACHE_CAP; i++) {
+      const doc = cacheDocument("plain", `file:///doc${i}.txt`);
+      docs.push(doc);
+      cache.getCachedMatches(doc, config);
+    }
+    cache.getCachedMatches(docs[0], config);
+    cache.getCachedMatches(cacheDocument("plain", "file:///new.txt"), config);
+    assert.strictEqual(cache.has("file:///doc0.txt"), true);
+    assert.strictEqual(cache.has("file:///doc1.txt"), false);
+  });
+
+  test("tryIncrementalUpdate applies a single change to a cached large document", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const uri = "file:///big.txt";
+    const initial = bigText();
+    const cached = cache.getCachedMatches(
+      cacheDocument(initial, uri, 1),
+      config,
+    );
+    assert.strictEqual(cached.length, 1);
+
+    const change = {
+      range: {
+        start: { line: 20, character: 0 },
+        end: { line: 20, character: 0 },
+      },
+      text: N_TILDE,
+    };
+    const newText = applyChangeToText(initial, change);
+    const docV2 = cacheDocument(newText, uri, 2);
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(changeEvent(docV2, [change]), config),
+      true,
+    );
+
+    const expected = findNonAsciiCharacters(
+      richMockDocument(newText),
+      new Set(),
+    );
+    const matches = cache.getCachedMatches(docV2, config);
+    assert.ok(
+      matchesEqual(matches, expected),
+      `incremental != full\n  expected: ${expected.map(describeMatch).join(", ")}\n  got:      ${matches.map(describeMatch).join(", ")}`,
+    );
+  });
+
+  const noopChange = {
+    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+    text: "x",
+  };
+
+  test("tryIncrementalUpdate returns false below the line threshold", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const uri = "file:///small.txt";
+    cache.getCachedMatches(cacheDocument(`a${E_ACUTE}b`, uri, 1), config);
+    const docV2 = cacheDocument(`xa${E_ACUTE}b`, uri, 2);
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(changeEvent(docV2, [noopChange]), config),
+      false,
+    );
+  });
+
+  test("tryIncrementalUpdate returns false when string/comment filters are active", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig({ includeStrings: false });
+    const uri = "file:///filtered.txt";
+    const initial = bigText();
+    cache.getCachedMatches(cacheDocument(initial, uri, 1), config);
+    const docV2 = cacheDocument(`x${initial}`, uri, 2);
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(changeEvent(docV2, [noopChange]), config),
+      false,
+    );
+  });
+
+  test("tryIncrementalUpdate returns false without a cache entry", () => {
+    const cache = new ScanCache();
+    const docV2 = cacheDocument(bigText(), "file:///uncached.txt", 2);
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(
+        changeEvent(docV2, [noopChange]),
+        cacheConfig(),
+      ),
+      false,
+    );
+  });
+
+  test("tryIncrementalUpdate returns false on fingerprint mismatch", () => {
+    const cache = new ScanCache();
+    const uri = "file:///stale-config.txt";
+    const initial = bigText();
+    cache.getCachedMatches(cacheDocument(initial, uri, 1), cacheConfig());
+    const docV2 = cacheDocument(`x${initial}`, uri, 2);
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(
+        changeEvent(docV2, [noopChange]),
+        cacheConfig({ allowedCharactersKey: "changed" }),
+      ),
+      false,
+    );
+  });
+
+  test("tryIncrementalUpdate returns false when a version was skipped", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const uri = "file:///version-gap.txt";
+    const initial = bigText();
+    cache.getCachedMatches(cacheDocument(initial, uri, 1), config);
+    const docV3 = cacheDocument(`x${initial}`, uri, 3);
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(changeEvent(docV3, [noopChange]), config),
+      false,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
