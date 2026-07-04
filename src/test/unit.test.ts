@@ -48,6 +48,21 @@ vi.mock("vscode", () => ({
     Information: 2,
     Hint: 3,
   },
+  OverviewRulerLane: {
+    Left: 1,
+    Center: 2,
+    Right: 4,
+    Full: 7,
+  },
+  TextEdit: class TextEdit {
+    constructor(
+      public range: unknown,
+      public newText: string,
+    ) {}
+    static replace(range: unknown, newText: string): TextEdit {
+      return new TextEdit(range, newText);
+    }
+  },
   Diagnostic: class {
     source?: string;
     constructor(
@@ -88,11 +103,18 @@ import {
   goToNextNonAsciiCharacter,
   parseEntryChars,
 } from "../commands";
+import {
+  buildReplacementEdits,
+  buildReplacementsOnDemand,
+} from "../autoreplace";
 import * as configModule from "../config";
 import {
+  buildDecorationRenderOptions,
   compileIgnoredPaths,
   ExtensionConfig,
   getCharacterSeverity,
+  parseReplacementMap,
+  parseSeverityOverrides,
 } from "../config";
 import {
   disposeDecorationType,
@@ -126,6 +148,7 @@ import {
   NonAsciiMatch,
 } from "../scanner";
 import {
+  debounce,
   formatCodePoint,
   formatUPlus,
   parseCharacterEntries,
@@ -2353,5 +2376,261 @@ describe("parseNameTable", () => {
     const txt = "2014 EM DASH\n";
     const map = parseNameTable(txt);
     assert.strictEqual(map.get(0x2014), "EM DASH");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// autoreplace: buildReplacementEdits / buildReplacementsOnDemand
+// ---------------------------------------------------------------------------
+
+describe("autoreplace", () => {
+  const doc = {
+    uri: { toString: () => "file:///autoreplace.txt" },
+  } as unknown as vscode.TextDocument;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function spyConfig(overrides: Partial<ExtensionConfig>): void {
+    vi.spyOn(configModule, "getConfig").mockReturnValue(cacheConfig(overrides));
+  }
+
+  test("buildReplacementEdits builds edits for mapped characters only", () => {
+    spyConfig({
+      autoReplaceOnSave: true,
+      replacements: [{ from: E_ACUTE, to: "e" }],
+    });
+    const matches = [makeMatch(E_ACUTE, 0, 1), makeMatch(N_TILDE, 0, 3)];
+    const edits = buildReplacementEdits(doc, () => matches);
+    assert.strictEqual(edits.length, 1);
+    assert.strictEqual(edits[0].newText, "e");
+    assert.strictEqual(edits[0].range.start.character, 1);
+  });
+
+  test("buildReplacementEdits returns [] when the extension is disabled", () => {
+    spyConfig({
+      enable: false,
+      autoReplaceOnSave: true,
+      replacements: [{ from: E_ACUTE, to: "e" }],
+    });
+    assert.deepStrictEqual(
+      buildReplacementEdits(doc, () => [makeMatch(E_ACUTE, 0, 0)]),
+      [],
+    );
+  });
+
+  test("buildReplacementEdits returns [] when autoReplaceOnSave is off", () => {
+    spyConfig({
+      autoReplaceOnSave: false,
+      replacements: [{ from: E_ACUTE, to: "e" }],
+    });
+    assert.deepStrictEqual(
+      buildReplacementEdits(doc, () => [makeMatch(E_ACUTE, 0, 0)]),
+      [],
+    );
+  });
+
+  test("buildReplacementsOnDemand works regardless of autoReplaceOnSave", () => {
+    spyConfig({
+      autoReplaceOnSave: false,
+      replacements: [{ from: E_ACUTE, to: "e" }],
+    });
+    const edits = buildReplacementsOnDemand(doc, () => [
+      makeMatch(E_ACUTE, 0, 0),
+    ]);
+    assert.strictEqual(edits.length, 1);
+  });
+
+  test("buildReplacementsOnDemand returns [] when the extension is disabled", () => {
+    spyConfig({ enable: false, replacements: [{ from: E_ACUTE, to: "e" }] });
+    assert.deepStrictEqual(
+      buildReplacementsOnDemand(doc, () => [makeMatch(E_ACUTE, 0, 0)]),
+      [],
+    );
+  });
+
+  test("returns [] when no match is in the replacement map", () => {
+    spyConfig({
+      autoReplaceOnSave: true,
+      replacements: [{ from: E_ACUTE, to: "e" }],
+    });
+    assert.deepStrictEqual(
+      buildReplacementEdits(doc, () => [makeMatch(N_TILDE, 0, 0)]),
+      [],
+    );
+  });
+
+  test("returns [] and notifies the user when the matcher throws", () => {
+    spyConfig({
+      autoReplaceOnSave: true,
+      replacements: [{ from: E_ACUTE, to: "e" }],
+    });
+    const showError = vscode.window.showErrorMessage as ReturnType<
+      typeof vi.fn
+    >;
+    showError.mockClear();
+    const edits = buildReplacementEdits(doc, () => {
+      throw new Error("matcher exploded in buildReplacementEdits test");
+    });
+    assert.deepStrictEqual(edits, []);
+    assert.ok(
+      showError.mock.calls.some(c => String(c[0]).includes("matcher exploded")),
+      "expected a user-facing error notification",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// config parsers
+// ---------------------------------------------------------------------------
+
+describe("parseReplacementMap", () => {
+  const EN_DASH = String.fromCodePoint(0x2013);
+
+  test("single u+hhhh key", () => {
+    assert.deepStrictEqual(parseReplacementMap({ "u+2013": "-" }), [
+      { from: EN_DASH, to: "-" },
+    ]);
+  });
+
+  test("range key expands to every character in the range", () => {
+    const entries = parseReplacementMap({ "u+2013 - u+2015": "-" });
+    assert.strictEqual(entries.length, 3);
+    assert.ok(entries.every(e => e.to === "-"));
+  });
+
+  test("comma-separated key", () => {
+    const entries = parseReplacementMap({ "u+2018, u+2019": "'" });
+    assert.strictEqual(entries.length, 2);
+  });
+
+  test("combined comma and range key", () => {
+    const entries = parseReplacementMap({ "u+2018, u+201c - u+201d": "'" });
+    assert.strictEqual(entries.length, 3);
+  });
+
+  test("invalid keys are skipped", () => {
+    assert.deepStrictEqual(parseReplacementMap({ bogus: "-" }), []);
+  });
+});
+
+describe("parseSeverityOverrides", () => {
+  test("maps valid entries to DiagnosticSeverity", () => {
+    const map = parseSeverityOverrides({
+      "u+00a0": "warning",
+      "u+200b": "error",
+      "u+00e9": "info",
+    });
+    assert.strictEqual(
+      map.get(String.fromCodePoint(0xa0)),
+      vscode.DiagnosticSeverity.Warning,
+    );
+    assert.strictEqual(
+      map.get(String.fromCodePoint(0x200b)),
+      vscode.DiagnosticSeverity.Error,
+    );
+    assert.strictEqual(map.get(E_ACUTE), vscode.DiagnosticSeverity.Information);
+  });
+
+  test("severity strings are case-insensitive", () => {
+    const map = parseSeverityOverrides({ "u+00a0": "ERROR" });
+    assert.strictEqual(
+      map.get(String.fromCodePoint(0xa0)),
+      vscode.DiagnosticSeverity.Error,
+    );
+  });
+
+  test("invalid severity values are skipped", () => {
+    assert.strictEqual(parseSeverityOverrides({ "u+00a0": "fatal" }).size, 0);
+  });
+
+  test("unparseable keys are skipped", () => {
+    assert.strictEqual(parseSeverityOverrides({ bogus: "error" }).size, 0);
+  });
+
+  test("keys are single code points only; range keys yield no entry", () => {
+    assert.strictEqual(
+      parseSeverityOverrides({ "u+2013 - u+2015": "error" }).size,
+      0,
+    );
+  });
+});
+
+describe("buildDecorationRenderOptions", () => {
+  test("omits overviewRulerLane when overviewRulerColor is unset", () => {
+    const opts = buildDecorationRenderOptions({
+      backgroundColor: "red",
+      overviewRulerLane: "Left",
+    });
+    assert.strictEqual(opts.overviewRulerLane, undefined);
+    assert.strictEqual(opts.backgroundColor, "red");
+  });
+
+  test("maps lane names when overviewRulerColor is set", () => {
+    const laneFor = (lane: string) =>
+      buildDecorationRenderOptions({
+        overviewRulerColor: "cyan",
+        overviewRulerLane: lane,
+      }).overviewRulerLane;
+    assert.strictEqual(laneFor("Left"), vscode.OverviewRulerLane.Left);
+    assert.strictEqual(laneFor("Right"), vscode.OverviewRulerLane.Right);
+    assert.strictEqual(laneFor("Full"), vscode.OverviewRulerLane.Full);
+    assert.strictEqual(laneFor("Center"), vscode.OverviewRulerLane.Center);
+    assert.strictEqual(laneFor("Diagonal"), vscode.OverviewRulerLane.Center);
+  });
+
+  test("defaults the lane to Center when unspecified", () => {
+    const opts = buildDecorationRenderOptions({ overviewRulerColor: "cyan" });
+    assert.strictEqual(opts.overviewRulerLane, vscode.OverviewRulerLane.Center);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// debounce
+// ---------------------------------------------------------------------------
+
+describe("debounce", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.runAllTimers();
+    vi.useRealTimers();
+  });
+
+  test("coalesces rapid calls into one trailing call with latest args", () => {
+    const fn = vi.fn();
+    const debounced = debounce(fn, 100);
+    debounced(1);
+    debounced(2);
+    debounced(3);
+    vi.advanceTimersByTime(99);
+    assert.strictEqual(fn.mock.calls.length, 0);
+    vi.advanceTimersByTime(1);
+    assert.strictEqual(fn.mock.calls.length, 1);
+    assert.deepStrictEqual(fn.mock.calls[0], [3]);
+  });
+
+  test("cancel suppresses the pending call", () => {
+    const fn = vi.fn();
+    const debounced = debounce(fn, 100);
+    debounced("x");
+    debounced.cancel();
+    vi.advanceTimersByTime(200);
+    assert.strictEqual(fn.mock.calls.length, 0);
+  });
+
+  test("is reusable after firing and after cancel", () => {
+    const fn = vi.fn();
+    const debounced = debounce(fn, 100);
+    debounced("a");
+    vi.advanceTimersByTime(100);
+    debounced("b");
+    debounced.cancel();
+    debounced("c");
+    vi.advanceTimersByTime(100);
+    assert.deepStrictEqual(fn.mock.calls, [["a"], ["c"]]);
   });
 });

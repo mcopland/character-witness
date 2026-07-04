@@ -26,9 +26,9 @@ import {
   formatHoverMarkdown,
   NonAsciiMatch,
 } from "./scanner";
+import { debounce } from "./utils";
 
 let diagnosticCollection: vscode.DiagnosticCollection;
-let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 const DEBOUNCE_MS = 250;
 
@@ -103,16 +103,11 @@ function clearEditor(editor: vscode.TextEditor): void {
   diagnosticCollection.delete(editor.document.uri);
 }
 
-function scheduleUpdate(editor: vscode.TextEditor): void {
-  if (debounceTimer) {
-    clearTimeout(debounceTimer);
-  }
-  debounceTimer = setTimeout(() => {
-    if (editor.document.isClosed) return;
-    if (editor !== vscode.window.activeTextEditor) return;
-    updateEditor(editor);
-  }, DEBOUNCE_MS);
-}
+const scheduleUpdate = debounce((editor: vscode.TextEditor) => {
+  if (editor.document.isClosed) return;
+  if (editor !== vscode.window.activeTextEditor) return;
+  updateEditor(editor);
+}, DEBOUNCE_MS);
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(initOutputChannel());
@@ -232,10 +227,11 @@ export function activate(context: vscode.ExtensionContext): void {
         diagnosticCollection.delete(document.uri);
         scanCache.delete(document.uri.toString());
         invalidateConfig(document.uri);
-        // Do not clear debounceTimer here: it is shared across all editors,
-        // so cancelling it when any document closes would silently drop a
-        // pending rescan for the active editor. The scheduleUpdate callback
-        // already guards against closed/inactive editors.
+        // Do not cancel the pending debounced update here: it is shared
+        // across all editors, so cancelling it when any document closes
+        // would silently drop a pending rescan for the active editor. The
+        // scheduleUpdate callback already guards against closed/inactive
+        // editors.
       } catch (err) {
         handleError("onDidCloseTextDocument", err);
       }
@@ -287,8 +283,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   log("deactivated");
-  if (debounceTimer) {
-    clearTimeout(debounceTimer);
-  }
+  scheduleUpdate.cancel();
   disposeDecorationType();
 }
