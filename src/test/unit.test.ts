@@ -122,7 +122,7 @@ import {
   resetDecorationKey,
 } from "../decoration";
 import { buildLineDiagnostics } from "../diagnostics";
-import { handleError } from "../logger";
+import { handleError, resetErrorThrottle } from "../logger";
 import { isIgnoredDocument } from "../extension";
 import {
   computeFingerprint,
@@ -2136,6 +2136,7 @@ describe("invalidateConfig", () => {
 describe("handleError", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    resetErrorThrottle();
     (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mockClear();
   });
 
@@ -2181,6 +2182,31 @@ describe("handleError", () => {
       (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls
         .length,
       2,
+    );
+  });
+
+  test("suppresses a repeated message even after a different message intervenes", () => {
+    handleError("ctx", new Error("error A"));
+    handleError("ctx", new Error("error B"));
+    handleError("ctx", new Error("error A"));
+    assert.strictEqual(
+      (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls
+        .length,
+      2,
+    );
+  });
+
+  test("each message expires on its own window despite interleaving", () => {
+    handleError("ctx", new Error("error A"));
+    vi.advanceTimersByTime(6_000);
+    handleError("ctx", new Error("error B"));
+    vi.advanceTimersByTime(5_000);
+    handleError("ctx", new Error("error A"));
+    handleError("ctx", new Error("error B"));
+    assert.strictEqual(
+      (vscode.window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls
+        .length,
+      3,
     );
   });
 });

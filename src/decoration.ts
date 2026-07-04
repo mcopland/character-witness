@@ -12,6 +12,9 @@ let decorationType: vscode.TextEditorDecorationType | undefined;
 let lastDecorationKey = "";
 
 export function ensureDecorationType(): vscode.TextEditorDecorationType {
+  // Resource-less read is intentional: the decoration setting has no scope
+  // in package.json (window scope), so per-resource reads cannot differ, and
+  // the single lastDecorationKey fingerprint below relies on that invariant.
   const config = getConfig();
   const key = JSON.stringify(config.decoration);
 
