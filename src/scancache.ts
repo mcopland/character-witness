@@ -64,6 +64,11 @@ export class ScanCache {
   ): boolean {
     if (!this.canIncrementalUpdate(event.document, config)) return false;
     if (event.contentChanges.length === 0) return false;
+    // Multiple changes in one event carry pre-event line numbers, but only
+    // the fully-updated document is available to rescan; an earlier-in-
+    // document change that alters the line count would corrupt the mapping
+    // of the later changes. Fall back to a full scan instead.
+    if (event.contentChanges.length > 1) return false;
 
     const key = event.document.uri.toString();
     const cached = this.entries.get(key);
@@ -73,15 +78,12 @@ export class ScanCache {
     if (cached.fingerprint !== fingerprint) return false;
     if (cached.version !== event.document.version - 1) return false;
 
-    let matches = cached.matches;
-    for (const change of event.contentChanges) {
-      matches = applyIncrementalChange(
-        matches,
-        event.document,
-        change,
-        config.allowedCharacters,
-      );
-    }
+    const matches = applyIncrementalChange(
+      cached.matches,
+      event.document,
+      event.contentChanges[0],
+      config.allowedCharacters,
+    );
 
     this.touch(key, {
       version: event.document.version,

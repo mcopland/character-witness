@@ -1707,6 +1707,62 @@ describe("ScanCache", () => {
     );
   });
 
+  test("falls back to a full rescan for multi-change events", () => {
+    const cache = new ScanCache();
+    const config = cacheConfig();
+    const uri = "file:///multi.txt";
+    const lines: string[] = [];
+    for (let i = 0; i < INCREMENTAL_THRESHOLD_LINES + 100; i++) {
+      if (i === 10) lines.push(`a${E_ACUTE}b`);
+      else if (i === 4000) lines.push(`c${N_TILDE}d`);
+      else lines.push(`line${i}`);
+    }
+    const initial = lines.join("\n");
+    cache.getCachedMatches(cacheDocument(initial, uri, 1), config);
+
+    // VS Code delivers contentChanges in reverse document order, each using
+    // pre-event coordinates. The earlier-in-document change adds a newline,
+    // which invalidates the later change's pre-event line numbers against
+    // the fully-updated document.
+    const laterChange = {
+      range: {
+        start: { line: 3000, character: 0 },
+        end: { line: 3000, character: 0 },
+      },
+      text: N_TILDE,
+    };
+    const earlierChange = {
+      range: {
+        start: { line: 100, character: 0 },
+        end: { line: 100, character: 0 },
+      },
+      text: "x\n",
+    };
+    const newText = applyChangeToText(
+      applyChangeToText(initial, laterChange),
+      earlierChange,
+    );
+    const docV2 = cacheDocument(newText, uri, 2);
+
+    assert.strictEqual(
+      cache.tryIncrementalUpdate(
+        changeEvent(docV2, [laterChange, earlierChange]),
+        config,
+      ),
+      false,
+    );
+
+    const expected = findNonAsciiCharacters(
+      richMockDocument(newText),
+      new Set(),
+    );
+    const matches = cache.getCachedMatches(docV2, config);
+    assert.ok(
+      matchesEqual(matches, expected),
+      `multi-change result != full scan\n  expected: ${expected.map(describeMatch).join(", ")}\n  got:      ${matches.map(describeMatch).join(", ")}`,
+    );
+  });
+
   const noopChange = {
     range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
     text: "x",
